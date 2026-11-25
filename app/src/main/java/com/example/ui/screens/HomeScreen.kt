@@ -5,9 +5,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -237,26 +239,26 @@ fun HomeScreen(
         // Quick Launch Actions
         item {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Max),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 QuickActionTile(
                     icon = Icons.Filled.Add,
                     label = "New Project",
                     onClick = { onNavigateTab(PrimaryDestination.PROJECTS) },
-                    modifier = Modifier.weight(1f).testTag("quick_new_project")
+                    modifier = Modifier.weight(1f).fillMaxHeight().testTag("quick_new_project")
                 )
                 QuickActionTile(
                     icon = Icons.Filled.AutoAwesome,
                     label = "AI Studio",
                     onClick = { onNavigateTab(PrimaryDestination.AI_STUDIO) },
-                    modifier = Modifier.weight(1f).testTag("quick_ai_studio")
+                    modifier = Modifier.weight(1f).fillMaxHeight().testTag("quick_ai_studio")
                 )
                 QuickActionTile(
                     icon = Icons.Filled.Preview,
                     label = "Live Preview",
                     onClick = { onOpenLabSection(DeveloperLabSection.LIVE_PREVIEW) },
-                    modifier = Modifier.weight(1f).testTag("quick_live_preview")
+                    modifier = Modifier.weight(1f).fillMaxHeight().testTag("quick_live_preview")
                 )
             }
         }
@@ -271,7 +273,7 @@ fun HomeScreen(
 
         items(DeveloperLabSection.entries.chunked(2)) { rowSections ->
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Max),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 rowSections.forEach { section ->
@@ -279,7 +281,7 @@ fun HomeScreen(
                         section = section,
                         icon = iconForLabSection(section),
                         onClick = { onOpenLabSection(section) },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).fillMaxHeight()
                     )
                 }
                 if (rowSections.size == 1) {
@@ -404,7 +406,6 @@ private fun DeveloperLabCard(
     LdroidSurfaceCard(
         onClick = onClick,
         modifier = modifier
-            .height(98.dp)
             .testTag("lab_${section.name.lowercase()}")
     ) {
         Row(

@@ -178,6 +178,13 @@ data class AiChatMessage(
     val isError: Boolean = false
 )
 
+data class AiConversation(
+    val id: String,
+    val title: String,
+    val timestampMs: Long,
+    val messages: List<AiChatMessage> = emptyList()
+)
+
 data class FileDiffLine(
     val marker: Char, // '+', '-', ' '
     val lineNumberOld: Int?,

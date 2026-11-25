@@ -27,6 +27,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -59,6 +60,7 @@ import com.example.ui.theme.LdroidTokens
 import com.example.ui.theme.LocalLdroidTokens
 import com.example.viewmodel.LdroidUiState
 import com.example.viewmodel.LdroidViewModel
+import kotlin.math.roundToInt
 
 @Composable
 fun SettingsScreen(
@@ -78,6 +80,7 @@ fun SettingsScreen(
     var aiKeyInput by remember { mutableStateOf("") }
     var redactSecrets by remember(settings.redactSecretsInAi) { mutableStateOf(settings.redactSecretsInAi) }
     var githubPatInput by remember { mutableStateOf("") }
+    var vaultRevision by remember { mutableIntStateOf(0) }
 
     // Editor prefs draft
     var fontSize by remember(settings.editorFontSizeSp) { mutableIntStateOf(settings.editorFontSizeSp) }
@@ -158,14 +161,43 @@ fun SettingsScreen(
 
         // BYOK AI & GitHub Credential Vault (M09 / M32)
         item {
-            val currentMask = SecureCredentialVault.maskCredential(
-                viewModel.vault.readSecret(viewModel.vault.slotForAiProvider(selectedProvider))
-            )
-            val ghMask = SecureCredentialVault.maskCredential(
-                viewModel.vault.readSecret(viewModel.vault.githubTokenSlot)
-            )
+            val currentMask = remember(selectedProvider, vaultRevision, uiState.statusMessage) {
+                SecureCredentialVault.maskCredential(
+                    viewModel.vault.readSecret(viewModel.vault.slotForAiProvider(selectedProvider))
+                )
+            }
+            val ghMask = remember(vaultRevision, uiState.statusMessage) {
+                SecureCredentialVault.maskCredential(
+                    viewModel.vault.readSecret(viewModel.vault.githubTokenSlot)
+                )
+            }
+            val baseUrlWarning = remember(aiBaseUrl, selectedProvider) {
+                validateApiBaseUrl(aiBaseUrl, selectedProvider)
+            }
+            val modelPresets = remember(selectedProvider) {
+                when (selectedProvider) {
+                    AiProviderType.GEMINI -> listOf("gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash")
+                    AiProviderType.OPENAI_COMPATIBLE -> listOf("gpt-4o-mini", "gpt-4o", "o3-mini")
+                    AiProviderType.ANTHROPIC -> listOf("claude-3-5-sonnet-latest", "claude-3-7-sonnet-latest", "claude-3-5-haiku-latest")
+                }
+            }
+
             LdroidSurfaceCard {
-                Text("BYOK AI & Secrets Vault (AndroidKeyStore)", color = tokens.textPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("BYOK AI & Secrets Vault", color = tokens.textPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    TextButton(
+                        onClick = {
+                            aiModel = selectedProvider.defaultModel
+                            aiBaseUrl = selectedProvider.defaultBaseUrl
+                        }
+                    ) {
+                        Text("Reset Defaults", fontSize = 11.sp, color = tokens.primaryAccent)
+                    }
+                }
                 Text("Keys are AES-256-GCM encrypted on-device and never committed or logged.", color = tokens.textMuted, fontSize = 11.sp)
                 Spacer(Modifier.height(8.dp))
 
@@ -175,8 +207,13 @@ fun SettingsScreen(
                             selected = selectedProvider == p,
                             onClick = {
                                 selectedProvider = p
-                                aiModel = p.defaultModel
-                                aiBaseUrl = p.defaultBaseUrl
+                                if (p == settings.aiProvider) {
+                                    aiModel = settings.aiModel
+                                    aiBaseUrl = settings.aiBaseUrl
+                                } else {
+                                    aiModel = p.defaultModel
+                                    aiBaseUrl = p.defaultBaseUrl
+                                }
                             },
                             label = { Text(p.displayName.substringBefore(' '), fontSize = 11.sp) }
                         )
@@ -192,6 +229,17 @@ fun SettingsScreen(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().testTag("settings_ai_key_input")
                 )
+                Spacer(Modifier.height(6.dp))
+                Text("Model Presets", color = tokens.textMuted, fontSize = 11.sp)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(modelPresets) { preset ->
+                        FilterChip(
+                            selected = aiModel.trim() == preset,
+                            onClick = { aiModel = preset },
+                            label = { Text(preset, fontSize = 11.sp, fontFamily = JetBrainsMonoFontFamily) }
+                        )
+                    }
+                }
                 OutlinedTextField(
                     value = aiModel,
                     onValueChange = { aiModel = it },
@@ -202,10 +250,36 @@ fun SettingsScreen(
                 OutlinedTextField(
                     value = aiBaseUrl,
                     onValueChange = { aiBaseUrl = it },
-                    label = { Text("Base URL") },
+                    label = { Text("API Base URL") },
+                    isError = baseUrlWarning != null,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+                if (baseUrlWarning != null) {
+                    Spacer(Modifier.height(6.dp))
+                    Surface(
+                        color = tokens.warning.copy(alpha = 0.14f),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, tokens.warning.copy(alpha = 0.55f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = baseUrlWarning,
+                                color = tokens.warning,
+                                fontSize = 11.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = { aiBaseUrl = selectedProvider.defaultBaseUrl }) {
+                                Text("Use API URL", fontSize = 11.sp, color = tokens.primaryAccent)
+                            }
+                        }
+                    }
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -217,14 +291,22 @@ fun SettingsScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = {
-                            viewModel.saveAiProviderConfig(selectedProvider, aiModel, aiBaseUrl, aiKeyInput.ifBlank { null }, redactSecrets)
+                            val cleanModel = aiModel.trim().ifBlank { selectedProvider.defaultModel }
+                            val cleanUrl = aiBaseUrl.trim().trimEnd('/').ifBlank { selectedProvider.defaultBaseUrl }
+                            aiModel = cleanModel
+                            aiBaseUrl = cleanUrl
+                            viewModel.saveAiProviderConfig(selectedProvider, cleanModel, cleanUrl, aiKeyInput.ifBlank { null }, redactSecrets)
                             aiKeyInput = ""
+                            vaultRevision++
                         },
                         modifier = Modifier.weight(1f).height(48.dp).testTag("settings_save_ai_btn"),
                         colors = ButtonDefaults.buttonColors(containerColor = tokens.primaryAccent, contentColor = tokens.onPrimaryAccent)
                     ) { Text("Save AI Config") }
                     OutlinedButton(
-                        onClick = { viewModel.clearAiProviderKey(selectedProvider) },
+                        onClick = {
+                            viewModel.clearAiProviderKey(selectedProvider)
+                            vaultRevision++
+                        },
                         modifier = Modifier.height(48.dp)
                     ) { Text("Clear Key") }
                 }
@@ -248,6 +330,7 @@ fun SettingsScreen(
                         onClick = {
                             viewModel.saveGitHubToken(githubPatInput)
                             githubPatInput = ""
+                            vaultRevision++
                         },
                         modifier = Modifier.height(48.dp)
                     ) { Text("Save PAT") }
@@ -260,14 +343,29 @@ fun SettingsScreen(
             LdroidSurfaceCard {
                 Text("Code Editor Preferences", color = tokens.textPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Spacer(Modifier.height(6.dp))
-                Text("Font Size: ${fontSize}sp", color = tokens.textMuted, fontSize = 12.sp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Font Size", color = tokens.textMuted, fontSize = 12.sp)
+                    StatusPill("${fontSize}sp", tokens.primaryAccent)
+                }
                 Slider(
                     value = fontSize.toFloat(),
-                    onValueChange = { fontSize = it.toInt() },
+                    onValueChange = { fontSize = it.roundToInt().coerceIn(10, 22) },
                     onValueChangeFinished = {
                         viewModel.updateEditorSettings(fontSize, settings.tabWidth, autoSave, lineNumbers, wordWrap)
                     },
-                    valueRange = 10f..22f
+                    valueRange = 10f..22f,
+                    steps = 11,
+                    colors = SliderDefaults.colors(
+                        thumbColor = tokens.primaryAccent,
+                        activeTrackColor = tokens.primaryAccent,
+                        inactiveTrackColor = tokens.border,
+                        activeTickColor = tokens.onPrimaryAccent.copy(alpha = 0.6f),
+                        inactiveTickColor = tokens.textMuted.copy(alpha = 0.5f)
+                    )
                 )
                 TogglePrefRow("Line Numbers", lineNumbers) {
                     lineNumbers = it
@@ -415,4 +513,16 @@ private fun TogglePrefRow(label: String, checked: Boolean, onCheckedChange: (Boo
         Text(label, color = tokens.textPrimary, fontSize = 13.sp)
         Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
+}
+
+private fun validateApiBaseUrl(url: String, provider: AiProviderType): String? {
+    val clean = url.trim().lowercase()
+    if (clean.isEmpty()) return null
+    if (!clean.startsWith("https://") && !clean.startsWith("http://")) {
+        return "Base URL should start with https:// (expected ${provider.defaultBaseUrl})."
+    }
+    if (clean.contains("aistudio.google.com") || clean.contains("platform.openai.com") || clean.contains("console.anthropic.com")) {
+        return "Web console URLs return HTML instead of JSON. Use ${provider.defaultBaseUrl}."
+    }
+    return null
 }

@@ -42,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.preferences.LdroidSettingsState
@@ -68,7 +69,7 @@ fun AiStudioScreen(
         viewModel.vault.readSecret(viewModel.vault.slotForAiProvider(settings.aiProvider))
     }
     var promptText by remember { mutableStateOf("") }
-    var attachActiveFile by remember { mutableStateOf(true) }
+    var attachActiveFile by remember(uiState.activeTabPath != null) { mutableStateOf(uiState.activeTabPath != null) }
     var showArchGraph by remember { mutableStateOf(false) }
 
     Column(
@@ -239,7 +240,15 @@ fun AiStudioScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(change.relativePath, color = tokens.primaryAccent, fontSize = 12.sp, fontFamily = JetBrainsMonoFontFamily)
+                                        Text(
+                                            text = change.relativePath,
+                                            color = tokens.primaryAccent,
+                                            fontSize = 12.sp,
+                                            fontFamily = JetBrainsMonoFontFamily,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                                        )
                                         if (change.isApplied) {
                                             StatusPill("Applied", tokens.success)
                                         }
@@ -249,6 +258,13 @@ fun AiStudioScreen(
                                         change.proposedContent
                                     )
                                     DiffLinesBlock(diffLines.take(30))
+                                    if (diffLines.size > 30) {
+                                        Text(
+                                            text = "Showing first 30 of ${diffLines.size} diff lines",
+                                            color = tokens.textMuted,
+                                            fontSize = 10.sp
+                                        )
+                                    }
                                     if (!change.isApplied) {
                                         Button(
                                             onClick = { viewModel.applyAiProposedChange(msg.id, change) },
@@ -274,12 +290,19 @@ fun AiStudioScreen(
 
         // Prompt Input Area
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            val hasActiveFile = uiState.activeTabPath != null
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = attachActiveFile, onCheckedChange = { attachActiveFile = it })
+                Checkbox(
+                    checked = attachActiveFile && hasActiveFile,
+                    onCheckedChange = { attachActiveFile = it },
+                    enabled = hasActiveFile
+                )
                 Text(
-                    text = "Attach active file (${uiState.activeTabPath ?: "none"})",
+                    text = if (hasActiveFile) "Attach active file (${uiState.activeTabPath})" else "No active editor file to attach",
                     color = tokens.textMuted,
-                    fontSize = 12.sp
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             Row(
@@ -297,7 +320,7 @@ fun AiStudioScreen(
                 IconButton(
                     onClick = {
                         if (promptText.isNotBlank()) {
-                            viewModel.sendAiPrompt(promptText, attachActiveFile)
+                            viewModel.sendAiPrompt(promptText, attachActiveFile && hasActiveFile)
                             promptText = ""
                         }
                     },

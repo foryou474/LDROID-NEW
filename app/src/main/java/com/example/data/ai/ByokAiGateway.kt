@@ -108,6 +108,7 @@ class ByokAiGateway {
             if (!resp.isSuccessful) {
                 error("Gemini HTTP ${resp.code}: ${extractErrorMessage(respText)}")
             }
+            ensureJsonResponse(respText, AiProviderType.GEMINI)
             val json = JSONObject(respText)
             val candidates = json.optJSONArray("candidates") ?: error("Empty Gemini response")
             val parts = candidates.getJSONObject(0)
@@ -146,6 +147,7 @@ class ByokAiGateway {
             if (!resp.isSuccessful) {
                 error("OpenAI HTTP ${resp.code}: ${extractErrorMessage(respText)}")
             }
+            ensureJsonResponse(respText, AiProviderType.OPENAI_COMPATIBLE)
             val json = JSONObject(respText)
             return json.getJSONArray("choices")
                 .getJSONObject(0)
@@ -179,6 +181,7 @@ class ByokAiGateway {
             if (!resp.isSuccessful) {
                 error("Anthropic HTTP ${resp.code}: ${extractErrorMessage(respText)}")
             }
+            ensureJsonResponse(respText, AiProviderType.ANTHROPIC)
             val json = JSONObject(respText)
             val contentArr = json.getJSONArray("content")
             return buildString {
@@ -189,6 +192,13 @@ class ByokAiGateway {
                     }
                 }
             }
+        }
+    }
+
+    private fun ensureJsonResponse(respText: String, provider: AiProviderType) {
+        val trimmed = respText.trimStart()
+        if (trimmed.startsWith("<!DOCTYPE", ignoreCase = true) || trimmed.startsWith("<html", ignoreCase = true)) {
+            error("API endpoint returned HTML instead of JSON. Verify Base URL (should be ${provider.defaultBaseUrl}) and Model ID in Settings.")
         }
     }
 

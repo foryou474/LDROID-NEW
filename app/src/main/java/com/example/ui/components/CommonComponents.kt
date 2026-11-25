@@ -6,8 +6,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -66,24 +68,26 @@ fun LdroidSurfaceCard(
     val tokens = LocalLdroidTokens.current
     val bg = if (elevated) tokens.elevatedSurface else tokens.surface1
     val borderColor = if (accentBorder) tokens.primaryAccent.copy(alpha = 0.55f) else tokens.border
+    val shape = RoundedCornerShape(20.dp)
+    val cardColors = CardDefaults.cardColors(containerColor = bg, contentColor = tokens.textPrimary)
     if (onClick != null) {
         Card(
             onClick = onClick,
             modifier = modifier,
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = bg, contentColor = tokens.textPrimary),
+            shape = shape,
+            colors = cardColors,
             border = BorderStroke(1.dp, borderColor)
         ) {
-            Column(modifier = Modifier.padding(16.dp), content = content)
+            Column(modifier = Modifier.padding(18.dp), content = content)
         }
     } else {
         Card(
             modifier = modifier,
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = bg, contentColor = tokens.textPrimary),
+            shape = shape,
+            colors = cardColors,
             border = BorderStroke(1.dp, borderColor)
         ) {
-            Column(modifier = Modifier.padding(16.dp), content = content)
+            Column(modifier = Modifier.padding(18.dp), content = content)
         }
     }
 }
@@ -225,44 +229,53 @@ fun highlightSyntax(code: String, ext: String, tokens: LdroidTokens): AnnotatedS
 @Composable
 fun DiffLinesBlock(lines: List<FileDiffLine>) {
     val tokens = LocalLdroidTokens.current
-    Column(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(tokens.terminalBackground)
             .border(1.dp, tokens.border, RoundedCornerShape(12.dp))
-            .horizontalScroll(rememberScrollState())
-            .padding(8.dp)
     ) {
-        lines.forEach { line ->
-            val bg = when (line.marker) {
-                '+' -> tokens.diffAdded
-                '-' -> tokens.diffRemoved
-                else -> Color.Transparent
-            }
-            val fg = when (line.marker) {
-                '+' -> tokens.success
-                '-' -> tokens.error
-                else -> tokens.textMuted
-            }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(bg)
-                    .padding(horizontal = 6.dp, vertical = 1.dp)
-            ) {
-                Text(
-                    text = "${line.marker} ",
-                    color = fg,
-                    fontFamily = JetBrainsMonoFontFamily,
-                    fontSize = 11.sp
-                )
-                Text(
-                    text = line.text,
-                    color = if (line.marker == ' ') tokens.textMuted else tokens.textPrimary,
-                    fontFamily = JetBrainsMonoFontFamily,
-                    fontSize = 11.sp
-                )
+        val minWidth = maxWidth
+        Column(
+            modifier = Modifier
+                .horizontalScroll(rememberScrollState())
+                .widthIn(min = minWidth)
+                .width(IntrinsicSize.Max)
+                .padding(vertical = 8.dp)
+        ) {
+            lines.forEach { line ->
+                val bg = when (line.marker) {
+                    '+' -> tokens.diffAdded
+                    '-' -> tokens.diffRemoved
+                    else -> Color.Transparent
+                }
+                val fg = when (line.marker) {
+                    '+' -> tokens.success
+                    '-' -> tokens.error
+                    else -> tokens.textMuted
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(bg)
+                        .padding(horizontal = 10.dp, vertical = 1.dp)
+                ) {
+                    Text(
+                        text = "${line.marker} ",
+                        color = fg,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        fontSize = 11.sp,
+                        softWrap = false
+                    )
+                    Text(
+                        text = line.text,
+                        color = if (line.marker == ' ') tokens.textMuted else tokens.textPrimary,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        fontSize = 11.sp,
+                        softWrap = false
+                    )
+                }
             }
         }
     }

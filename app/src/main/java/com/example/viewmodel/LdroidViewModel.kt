@@ -47,6 +47,8 @@ import com.example.ui.theme.LdroidThemeId
 import com.example.ui.theme.LdroidThemes
 import com.example.ui.theme.LdroidTokens
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -116,6 +118,8 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _uiState = MutableStateFlow(LdroidUiState())
     val uiState: StateFlow<LdroidUiState> = _uiState.asStateFlow()
+
+    private var autoSaveJob: Job? = null
 
     val settings: StateFlow<LdroidSettingsState> = preferences.settingsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, LdroidSettingsState())
@@ -454,17 +458,45 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
             state.copy(openTabs = updated)
         }
         latestTab?.let { tab ->
-            updateCodeLivePreview(tab.relativePath, tab.content)
-            val fileIssues = StaticAnalyzer.analyzeFile(tab.relativePath, tab.content)
-            _uiState.update { state ->
-                val others = state.diagnostics.filterNot { it.filePath == tab.relativePath }
-                state.copy(diagnostics = fileIssues + others)
+            onTabContentMutated(tab)
+        }
+    }
+
+    private fun onTabContentMutated(tab: OpenEditorTab) {
+        updateCodeLivePreview(tab.relativePath, tab.content)
+        val fileIssues = StaticAnalyzer.analyzeFile(tab.relativePath, tab.content)
+        _uiState.update { state ->
+            val others = state.diagnostics.filterNot { it.filePath == tab.relativePath }
+            state.copy(diagnostics = fileIssues + others)
+        }
+        if (settings.value.autoSaveEnabled && !tab.isLargeFilePreview) {
+            scheduleAutoSave(tab.relativePath)
+        }
+    }
+
+    private fun scheduleAutoSave(relativePath: String) {
+        autoSaveJob?.cancel()
+        autoSaveJob = viewModelScope.launch {
+            delay(1200L)
+            val project = _uiState.value.activeProject ?: return@launch
+            val currentTab = _uiState.value.openTabs.firstOrNull { it.relativePath == relativePath } ?: return@launch
+            if (!currentTab.isDirty || currentTab.isLargeFilePreview) return@launch
+            fileManager.saveFileTab(project, currentTab).onSuccess { saved ->
+                _uiState.update { state ->
+                    state.copy(
+                        openTabs = state.openTabs.map {
+                            if (it.relativePath == saved.relativePath) saved else it
+                        }
+                    )
+                }
+                refreshWorkspaceFilesAndAnalysis(project)
             }
         }
     }
 
     fun undoActiveTab() {
         val activePath = _uiState.value.activeTabPath ?: return
+        var latestTab: OpenEditorTab? = null
         _uiState.update { state ->
             val updated = state.openTabs.map { tab ->
                 if (tab.relativePath == activePath && tab.undoStack.isNotEmpty()) {
@@ -473,15 +505,17 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
                         content = previous,
                         undoStack = tab.undoStack.dropLast(1),
                         redoStack = (tab.redoStack + tab.content).takeLast(40)
-                    )
+                    ).also { latestTab = it }
                 } else tab
             }
             state.copy(openTabs = updated)
         }
+        latestTab?.let { onTabContentMutated(it) }
     }
 
     fun redoActiveTab() {
         val activePath = _uiState.value.activeTabPath ?: return
+        var latestTab: OpenEditorTab? = null
         _uiState.update { state ->
             val updated = state.openTabs.map { tab ->
                 if (tab.relativePath == activePath && tab.redoStack.isNotEmpty()) {
@@ -490,11 +524,12 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
                         content = next,
                         undoStack = (tab.undoStack + tab.content).takeLast(40),
                         redoStack = tab.redoStack.dropLast(1)
-                    )
+                    ).also { latestTab = it }
                 } else tab
             }
             state.copy(openTabs = updated)
         }
+        latestTab?.let { onTabContentMutated(it) }
     }
 
     fun setActiveTabEncodingAndEnding(encoding: TextEncodingOption, lineEnding: LineEnding) {
@@ -529,16 +564,22 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun replaceInActiveTab(find: String, replace: String, replaceAll: Boolean) {
+    fun replaceInActiveTab(find: String, replace: String, replaceAll: Boolean, ignoreCase: Boolean = false) {
         if (find.isEmpty()) return
         val tab = _uiState.value.activeTab ?: return
-        val next = if (replaceAll) tab.content.replace(find, replace)
-        else tab.content.replaceFirst(find, replace)
+        val options = if (ignoreCase) setOf(RegexOption.IGNORE_CASE) else emptySet()
+        val regex = Regex(Regex.escape(find), options)
+        val matchCount = regex.findAll(tab.content).count()
+        if (matchCount == 0) {
+            postMessage("No matches found for '$find'")
+            return
+        }
+        val safeReplacement = Regex.escapeReplacement(replace)
+        val next = if (replaceAll) regex.replace(tab.content, safeReplacement)
+        else regex.replaceFirst(tab.content, safeReplacement)
         if (next != tab.content) {
             updateActiveTabContent(next)
-            postMessage(if (replaceAll) "Replaced all occurrences" else "Replaced first occurrence")
-        } else {
-            postMessage("No matches found for '$find'")
+            postMessage(if (replaceAll) "Replaced $matchCount occurrence(s)" else "Replaced first occurrence")
         }
     }
 

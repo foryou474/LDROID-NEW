@@ -44,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.ProjectEntity
@@ -238,7 +239,15 @@ fun ProjectsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(change.relativePath, color = tokens.textPrimary, fontFamily = JetBrainsMonoFontFamily, fontSize = 12.sp)
+                        Text(
+                            text = change.relativePath,
+                            color = tokens.textPrimary,
+                            fontFamily = JetBrainsMonoFontFamily,
+                            fontSize = 12.sp,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                         StatusPill(
                             change.status,
                             when (change.status) {
@@ -250,6 +259,14 @@ fun ProjectsScreen(
                     }
                     Spacer(Modifier.height(8.dp))
                     DiffLinesBlock(change.diffLines.take(40))
+                    if (change.diffLines.size > 40) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "Showing first 40 of ${change.diffLines.size} diff lines",
+                            color = tokens.textMuted,
+                            fontSize = 10.sp
+                        )
+                    }
                 }
             }
         }

@@ -34,10 +34,20 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.viewinterop.AndroidView
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import com.example.model.VisualComponentType
+import com.example.model.VisualNode
+import com.example.ui.components.StatusPill
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,6 +59,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.preferences.LdroidSettingsState
@@ -170,10 +181,12 @@ fun EditorScreen(
             }
         }
 
-        // Find & Replace Bar
+        // Find & Replace Panel
         if (showFindBar) {
-            FindReplaceBar(
-                onReplace = { f, r, all -> viewModel.replaceInActiveTab(f, r, all) }
+            FindReplacePanel(
+                activeContent = activeTab?.content.orEmpty(),
+                onReplace = { f, r, all, ignoreCase -> viewModel.replaceInActiveTab(f, r, all, ignoreCase) },
+                onClose = { showFindBar = false }
             )
         }
 
@@ -274,21 +287,7 @@ fun EditorScreen(
                         }
                         EditorWorkspaceMode.VISUAL_BUILDER -> VisualBuilderPanel(uiState = uiState, viewModel = viewModel)
                         EditorWorkspaceMode.LIVE_PREVIEW -> {
-                            val codePrev = uiState.codePreviewState
-                            Column(
-                                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                DeviceFramePreviewCanvas(
-                                    title = codePrev.lastGoodTitle,
-                                    nodes = codePrev.lastGoodNodes,
-                                    profile = uiState.selectedDeviceProfile,
-                                    landscape = uiState.previewLandscape,
-                                    fontScale = uiState.previewFontScale,
-                                    isStale = codePrev.isStale,
-                                    staleError = codePrev.errorMessage
-                                )
-                            }
+                            LiveContentPreviewPane(activeTab = activeTab, uiState = uiState)
                         }
                     }
                 }
@@ -461,39 +460,101 @@ private fun CodeEditorSurface(
 }
 
 @Composable
-private fun FindReplaceBar(onReplace: (String, String, Boolean) -> Unit) {
+private fun FindReplacePanel(
+    activeContent: String,
+    onReplace: (String, String, Boolean, Boolean) -> Unit,
+    onClose: () -> Unit
+) {
     val tokens = LocalLdroidTokens.current
-    var find by remember { mutableStateOf("") }
-    var replace by remember { mutableStateOf("") }
+    var findText by remember { mutableStateOf("") }
+    var replaceText by remember { mutableStateOf("") }
+    var matchCase by remember { mutableStateOf(false) }
+
+    val matchesCount = remember(activeContent, findText, matchCase) {
+        if (findText.isEmpty()) 0 else {
+            val options = if (matchCase) setOf() else setOf(RegexOption.IGNORE_CASE)
+            runCatching { Regex(Regex.escape(findText), options).findAll(activeContent).count() }.getOrDefault(0)
+        }
+    }
+
     Surface(
         color = tokens.surface1,
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, tokens.border)
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, tokens.primaryAccent.copy(alpha = 0.5f)),
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedTextField(
-                value = find,
-                onValueChange = { find = it },
-                placeholder = { Text("Find", fontSize = 11.sp) },
-                singleLine = true,
-                modifier = Modifier.weight(1f)
-            )
-            OutlinedTextField(
-                value = replace,
-                onValueChange = { replace = it },
-                placeholder = { Text("Replace", fontSize = 11.sp) },
-                singleLine = true,
-                modifier = Modifier.weight(1f)
-            )
-            Button(
-                onClick = { onReplace(find, replace, true) },
-                colors = ButtonDefaults.buttonColors(containerColor = tokens.primaryAccent, contentColor = tokens.onPrimaryAccent)
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("All", fontSize = 11.sp)
+                Text(
+                    text = "Find & Replace",
+                    color = tokens.primaryAccent,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = if (findText.isEmpty()) "Enter search query" else "$matchesCount match(es)",
+                        color = if (matchesCount > 0) tokens.success else tokens.textMuted,
+                        fontSize = 11.sp
+                    )
+                    IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Filled.Close, contentDescription = "Close Find & Replace", tint = tokens.textMuted, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = findText,
+                    onValueChange = { findText = it },
+                    placeholder = { Text("Find text...", fontSize = 12.sp) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f).testTag("find_input")
+                )
+                OutlinedTextField(
+                    value = replaceText,
+                    onValueChange = { replaceText = it },
+                    placeholder = { Text("Replace with...", fontSize = 12.sp) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f).testTag("replace_input")
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilterChip(
+                    selected = matchCase,
+                    onClick = { matchCase = !matchCase },
+                    label = { Text("Aa Case", fontSize = 11.sp) }
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { onReplace(findText, replaceText, false, !matchCase) },
+                        enabled = findText.isNotEmpty() && matchesCount > 0,
+                        modifier = Modifier.height(40.dp)
+                    ) {
+                        Text("Replace Next", fontSize = 11.sp)
+                    }
+                    Button(
+                        onClick = { onReplace(findText, replaceText, true, !matchCase) },
+                        enabled = findText.isNotEmpty() && matchesCount > 0,
+                        colors = ButtonDefaults.buttonColors(containerColor = tokens.primaryAccent, contentColor = tokens.onPrimaryAccent),
+                        modifier = Modifier.height(40.dp).testTag("replace_all_btn")
+                    ) {
+                        Text("Replace All", fontSize = 11.sp)
+                    }
+                }
             }
         }
     }
@@ -525,4 +586,178 @@ private fun SinglePathDialog(
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+}
+
+@Composable
+private fun LiveContentPreviewPane(
+    activeTab: com.example.model.OpenEditorTab?,
+    uiState: LdroidUiState,
+    modifier: Modifier = Modifier
+) {
+    val tokens = LocalLdroidTokens.current
+    val path = activeTab?.relativePath?.lowercase().orEmpty()
+    val content = activeTab?.content.orEmpty()
+
+    Surface(
+        modifier = modifier.fillMaxSize(),
+        color = tokens.surface1,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, tokens.border)
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Live Preview: ${activeTab?.relativePath ?: "No file active"}",
+                    color = tokens.primaryAccent,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                )
+                StatusPill(
+                    label = when {
+                        path.endsWith(".html") || path.endsWith(".htm") -> "HTML / CSS WebView"
+                        path.endsWith(".xml") -> "XML Layout Inspector"
+                        else -> "Compose Code Preview"
+                    },
+                    color = tokens.success
+                )
+            }
+
+            Spacer(Modifier.height(4.dp))
+
+            when {
+                path.endsWith(".html") || path.endsWith(".htm") -> {
+                    AndroidView(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.White),
+                        factory = { ctx ->
+                            WebView(ctx).apply {
+                                settings.javaScriptEnabled = true
+                                webViewClient = WebViewClient()
+                                tag = content
+                                loadDataWithBaseURL(null, content, "text/html", "UTF-8", null)
+                            }
+                        },
+                        update = { webView ->
+                            if (webView.tag != content) {
+                                webView.tag = content
+                                webView.loadDataWithBaseURL(null, content, "text/html", "UTF-8", null)
+                            }
+                        }
+                    )
+                }
+                path.endsWith(".xml") -> {
+                    val parsedNodes = remember(content) { parseXmlLayoutToNodes(content) }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .verticalScroll(rememberScrollState())
+                            .background(tokens.surface2, RoundedCornerShape(12.dp))
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        if (parsedNodes.isEmpty()) {
+                            Text(
+                                text = "No layout components detected in XML. Type elements like <TextView ... android:text=\"Hello\" /> or <Button />",
+                                color = tokens.textMuted,
+                                fontSize = 12.sp
+                            )
+                        } else {
+                            parsedNodes.forEach { node ->
+                                when (node.type) {
+                                    VisualComponentType.TEXT -> Text(node.label, color = tokens.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                    VisualComponentType.BUTTON -> Button(onClick = {}, modifier = Modifier.fillMaxWidth()) { Text(node.label) }
+                                    VisualComponentType.TEXT_FIELD -> OutlinedTextField(value = "", onValueChange = {}, label = { Text(node.label) }, modifier = Modifier.fillMaxWidth())
+                                    VisualComponentType.SWITCH_CONTROL -> Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(node.label, color = tokens.textPrimary)
+                                        Switch(checked = true, onCheckedChange = {})
+                                    }
+                                    VisualComponentType.CARD -> Surface(
+                                        color = tokens.surface1,
+                                        shape = RoundedCornerShape(12.dp),
+                                        border = BorderStroke(1.dp, tokens.border),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(node.label, color = tokens.textPrimary, fontSize = 13.sp, modifier = Modifier.padding(12.dp))
+                                    }
+                                    else -> Surface(color = tokens.surface1, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                        Text(node.label, color = tokens.textMuted, fontSize = 12.sp, modifier = Modifier.padding(10.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                else -> {
+                    val codePrev = uiState.codePreviewState
+                    Column(
+                        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        DeviceFramePreviewCanvas(
+                            title = codePrev.lastGoodTitle,
+                            nodes = codePrev.lastGoodNodes,
+                            profile = uiState.selectedDeviceProfile,
+                            landscape = uiState.previewLandscape,
+                            fontScale = uiState.previewFontScale,
+                            isStale = codePrev.isStale,
+                            staleError = codePrev.errorMessage
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun parseXmlLayoutToNodes(xml: String): List<VisualNode> {
+    val nodes = mutableListOf<VisualNode>()
+    val tagRegex = Regex("""<([A-Za-z0-9._]+)([^>]*?)>""")
+    val textAttrRegex = Regex("""android:text\s*=\s*"([^"]*)"""")
+    val hintAttrRegex = Regex("""android:hint\s*=\s*"([^"]*)"""")
+    val titleAttrRegex = Regex("""app:title\s*=\s*"([^"]*)"""")
+
+    val containerTags = setOf(
+        "LinearLayout", "FrameLayout", "RelativeLayout", "ConstraintLayout",
+        "CoordinatorLayout", "ScrollView", "NestedScrollView", "merge"
+    )
+
+    tagRegex.findAll(xml).forEach { match ->
+        val rawTag = match.groupValues[1]
+        val simpleTag = rawTag.substringAfterLast('.')
+        val attrs = match.groupValues[2]
+        val explicitLabel = textAttrRegex.find(attrs)?.groupValues?.get(1)
+            ?: hintAttrRegex.find(attrs)?.groupValues?.get(1)
+            ?: titleAttrRegex.find(attrs)?.groupValues?.get(1)
+
+        if (simpleTag in containerTags && explicitLabel == null) {
+            return@forEach
+        }
+
+        val label = explicitLabel ?: simpleTag
+        val compType = when {
+            simpleTag.contains("TextView", ignoreCase = true) || simpleTag.contains("Toolbar", ignoreCase = true) -> VisualComponentType.TEXT
+            simpleTag.contains("Button", ignoreCase = true) || simpleTag.contains("FloatingActionButton", ignoreCase = true) -> VisualComponentType.BUTTON
+            simpleTag.contains("EditText", ignoreCase = true) || simpleTag.contains("TextInput", ignoreCase = true) -> VisualComponentType.TEXT_FIELD
+            simpleTag.contains("Switch", ignoreCase = true) || simpleTag.contains("CheckBox", ignoreCase = true) || simpleTag.contains("RadioButton", ignoreCase = true) -> VisualComponentType.SWITCH_CONTROL
+            simpleTag.contains("Card", ignoreCase = true) -> VisualComponentType.CARD
+            else -> VisualComponentType.COLUMN
+        }
+        nodes.add(VisualNode(id = java.util.UUID.randomUUID().toString().take(6), type = compType, label = label))
+    }
+    return nodes
 }

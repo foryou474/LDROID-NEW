@@ -40,10 +40,15 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -313,8 +318,16 @@ fun BottomTerminalAndProblemsDock(
     var commandInput by remember { mutableStateOf("") }
     val activeSession = sessions.firstOrNull { it.id == activeSessionId } ?: sessions.firstOrNull()
 
+    val terminalListState = rememberLazyListState()
+    val lines = activeSession?.lines.orEmpty()
+    LaunchedEffect(lines.size) {
+        if (lines.isNotEmpty()) {
+            terminalListState.animateScrollToItem(lines.size - 1)
+        }
+    }
+
     Surface(
-        modifier = Modifier.fillMaxWidth().height(230.dp),
+        modifier = Modifier.fillMaxWidth().height(260.dp),
         color = tokens.terminalBackground,
         shape = RoundedCornerShape(14.dp),
         border = BorderStroke(1.dp, tokens.border)
@@ -355,10 +368,11 @@ fun BottomTerminalAndProblemsDock(
 
             if (!showProblems) {
                 LazyColumn(
+                    state = terminalListState,
                     modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    items(activeSession?.lines.orEmpty(), key = { it.id }) { line ->
+                    items(lines, key = { it.id }) { line ->
                         Text(
                             text = line.text,
                             color = when {
@@ -376,11 +390,19 @@ fun BottomTerminalAndProblemsDock(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    val runAction = {
+                        if (commandInput.isNotBlank()) {
+                            viewModel.runTerminalCommand(commandInput)
+                            commandInput = ""
+                        }
+                    }
                     OutlinedTextField(
                         value = commandInput,
                         onValueChange = { commandInput = it },
                         placeholder = { Text("sh command (ls, pwd, uname -a)...", fontSize = 11.sp) },
                         singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = { runAction() }),
                         modifier = Modifier.weight(1f).testTag("terminal_command_input")
                     )
                     if (activeSession?.isRunning == true) {
@@ -392,12 +414,7 @@ fun BottomTerminalAndProblemsDock(
                         }
                     } else {
                         IconButton(
-                            onClick = {
-                                if (commandInput.isNotBlank()) {
-                                    viewModel.runTerminalCommand(commandInput)
-                                    commandInput = ""
-                                }
-                            },
+                            onClick = runAction,
                             modifier = Modifier.size(48.dp).testTag("terminal_run_btn")
                         ) {
                             Icon(Icons.Filled.PlayArrow, contentDescription = "Run command", tint = tokens.primaryAccent)
