@@ -1,0 +1,183 @@
+name: Android CI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Secret Scan, Lint, Unit Tests & Debug APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Cache Robolectric SDK jars
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: ${{ runner.os }}-robolectric-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-robolectric-
+
+      - name: Accept Android SDK licenses & install SDK 36.1
+        run: |
+          SDKMANAGER="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}" -name sdkmanager -type f | head -n 1)"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "platforms;android-36.1" "build-tools;36.0.0"
+
+      - name: Generate ephemeral debug keystore
+        run: |
+          if [ ! -f debug.keystore ]; then
+            keytool -genkeypair -noprompt \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: Scan for accidental secrets
+        run: |
+          if grep -rnE '(AIza[0-9A-Za-z\-_]{20,}|ghp_[A-Za-z0-9]{20,}|-----BEGIN .*PRIVATE KEY-----)' app/src docs; then
+            echo "Potential hardcoded secret found in source or docs!"
+            exit 1
+          fi
+
+      - name: Run Unit & Robolectric Tests
+        run: gradle :app:testDebugUnitTest
+
+      - name: Run Android Lint
+        run: gradle :app:lintDebug
+
+      - name: Build Debug APK
+        run: gradle :app:assembleDebug
+
+      - name: Verify Debug APK & Record SHA-256
+        run: |
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK_PATH"
+          APKSIGNER="$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          "$APKSIGNER" verify --print-certs "$APK_PATH"
+          sha256sum "$APK_PATH" | tee debug-sha256.txt
+
+      - name: Upload Debug APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LDROID-debug-apk
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            debug-sha256.txt
+          if-no-files-found: error
+
+  release_signed:
+    name: Signed Release APK & AAB
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Check signing secrets availability
+        id: check_secrets
+        env:
+          HAS_KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+          HAS_SP: ${{ secrets.STORE_PASSWORD != '' }}
+          HAS_KP: ${{ secrets.KEY_PASSWORD != '' }}
+        run: |
+          if [ "$HAS_KS" = "true" ] && [ "$HAS_SP" = "true" ] && [ "$HAS_KP" = "true" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Signing secrets (ANDROID_KEYSTORE_BASE64, STORE_PASSWORD, KEY_PASSWORD) not configured; skipping release build."
+          fi
+
+      - name: Accept Android SDK licenses & install SDK 36.1
+        if: steps.check_secrets.outputs.ready == 'true'
+        run: |
+          SDKMANAGER="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}" -name sdkmanager -type f | head -n 1)"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "platforms;android-36.1" "build-tools;36.0.0"
+
+      - name: Decode upload keystore
+        if: steps.check_secrets.outputs.ready == 'true'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "${{ runner.temp }}/release.jks"
+          chmod 600 "${{ runner.temp }}/release.jks"
+
+      - name: Build Signed Release APK & AAB
+        if: steps.check_secrets.outputs.ready == 'true'
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/release.jks
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          gradle :app:assembleRelease :app:bundleRelease
+
+      - name: Verify Signed Release Artifacts & Checksums
+        if: steps.check_secrets.outputs.ready == 'true'
+        run: |
+          mkdir -p release-artifacts
+          cp app/build/outputs/apk/release/app-release.apk release-artifacts/LDROID-release.apk
+          cp app/build/outputs/bundle/release/app-release.aab release-artifacts/LDROID-release.aab
+          test -s release-artifacts/LDROID-release.apk
+          test -s release-artifacts/LDROID-release.aab
+          APKSIGNER="$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          "$APKSIGNER" verify --print-certs release-artifacts/LDROID-release.apk
+          jarsigner -verify release-artifacts/LDROID-release.aab
+          sha256sum release-artifacts/LDROID-release.apk release-artifacts/LDROID-release.aab | tee release-artifacts/SHA256SUMS.txt
+
+      - name: Clean up temporary keystore
+        if: always()
+        run: rm -f "${{ runner.temp }}/release.jks"
+
+      - name: Upload Release Artifacts
+        if: steps.check_secrets.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: LDROID-release-artifacts
+          path: release-artifacts/*
+          if-no-files-found: error

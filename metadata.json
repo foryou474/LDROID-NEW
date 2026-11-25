@@ -1,0 +1,6 @@
+{
+  "name": "LDROID",
+  "description": "LDROID — Offline-first, guest-capable Android Development IDE with 10 themes, live preview, terminal, APK/AAB analyzer, and BYOK AI Studio",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
