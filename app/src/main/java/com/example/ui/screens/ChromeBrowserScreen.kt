@@ -674,6 +674,48 @@ fun ChromeBrowserScreen(
                     }
                 }
 
+                // Chrome Quick Bookmarks Bar
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    DEFAULT_DEV_BOOKMARKS.forEach { bm ->
+                        val active = currentTab.url.startsWith(bm.url)
+                        val tag = when (bm.title) {
+                            "GitHub" -> "bookmark_github"
+                            "Android Docs" -> "bookmark_android_docs"
+                            else -> "bookmark_${bm.title.lowercase().replace(" ", "_")}"
+                        }
+                        Surface(
+                            color = if (active) chromeAccent.copy(alpha = 0.16f) else if (isIncognito) Color(0xFF282832) else tokens.surface2,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, if (active) chromeAccent else if (isIncognito) Color(0xFF3E3F4C) else tokens.border),
+                            modifier = Modifier
+                                .clickable { navigateTo(bm.url) }
+                                .testTag(tag)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(bm.icon, fontSize = 11.sp)
+                                Text(
+                                    text = bm.title,
+                                    color = if (active) chromeAccent else chromeText,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (active) FontWeight.Bold else FontWeight.SemiBold,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Progress Bar
                 if (pageProgress in 1..99) {
                     LinearProgressIndicator(
