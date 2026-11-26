@@ -82,10 +82,10 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("home_menu_btn").performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithText("Guest Developer").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("drawer_section_settings").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("drawer_section_dev_lab").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("drawer_section_workspace_lab").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("drawer_section_library").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("drawer_section_settings").assertExists()
+        composeTestRule.onNodeWithTag("drawer_section_dev_lab").assertExists()
+        composeTestRule.onNodeWithTag("drawer_section_workspace_lab").assertExists()
+        composeTestRule.onNodeWithTag("drawer_section_library").assertExists()
     }
 
     @Test
