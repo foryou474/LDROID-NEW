@@ -17,9 +17,11 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
@@ -50,8 +52,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.model.PrimaryDestination
+import com.example.ui.screens.ChromeBrowserScreen
 import com.example.ui.screens.DeveloperLabDetailScreen
-import com.example.ui.screens.GoogleBrowserScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.LdroidSidebarDrawer
 import com.example.ui.screens.MaxStudioScreen
@@ -259,7 +261,7 @@ fun LdroidApp(viewModel: LdroidViewModel) {
                                 onBackToHome = { viewModel.selectPrimaryTab(PrimaryDestination.HOME) },
                                 modifier = Modifier.weight(1f)
                             )
-                            PrimaryDestination.GOOGLE -> GoogleBrowserScreen(
+                            PrimaryDestination.CHROME -> ChromeBrowserScreen(
                                 uiState = uiState,
                                 viewModel = viewModel,
                                 modifier = Modifier.weight(1f)
@@ -275,7 +277,7 @@ fun LdroidApp(viewModel: LdroidViewModel) {
 private fun iconForTab(dest: PrimaryDestination, selected: Boolean) = when (dest) {
     PrimaryDestination.HOME -> if (selected) Icons.Filled.Home else Icons.Outlined.Home
     PrimaryDestination.MAX_STUDIO -> if (selected) Icons.Filled.AutoAwesome else Icons.Outlined.AutoAwesome
-    PrimaryDestination.GOOGLE -> if (selected) Icons.Filled.Public else Icons.Outlined.Public
+    PrimaryDestination.CHROME -> if (selected) Icons.Filled.Language else Icons.Outlined.Language
 }
 
 private fun resolveUriName(context: android.content.Context, uri: Uri): String? {

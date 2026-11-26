@@ -1,6 +1,6 @@
 {
   "name": "LDROID IDE",
-  "description": "LDROID IDE — Android Studio in Your Pocket featuring Desert Luxe Material 3 design, Max Studio (Code E/G, AI UI Screen, Termux Shell), Developer Lab, Library & Packages, and In-App Developer Browser",
+  "description": "LDROID IDE — Android Studio in Your Pocket featuring Desert Luxe Material 3 design, Max Studio (Code E/G, AI UI Screen, Termux Shell), Developer Lab, Library & Packages, and In-App Chrome Developer Browser",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

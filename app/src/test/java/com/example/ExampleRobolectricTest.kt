@@ -76,7 +76,7 @@ class ExampleRobolectricTest {
         // Fixed 3-tab bottom bar visible on Home
         composeTestRule.onNodeWithTag("nav_home").assertIsDisplayed()
         composeTestRule.onNodeWithTag("nav_max_studio").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("nav_google").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("nav_chrome").assertIsDisplayed()
 
         // Open 82% sidebar drawer and verify all 4 expandable accordion sections
         composeTestRule.onNodeWithTag("home_menu_btn").performClick()
@@ -128,9 +128,9 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun verifyGoogleDeveloperBrowserBookmarksAndControls() {
+    fun verifyChromeDeveloperBrowserBookmarksAndControls() {
         composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("nav_google").performClick()
+        composeTestRule.onNodeWithTag("nav_chrome").performClick()
         composeTestRule.waitForIdle()
 
         composeTestRule.onNodeWithTag("browser_url_input").assertIsDisplayed()

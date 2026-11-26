@@ -106,9 +106,9 @@ object RoadmapRegistry {
         val navOk = PrimaryDestination.entries.size == 3 &&
             PrimaryDestination.HOME.label == "Home" &&
             PrimaryDestination.MAX_STUDIO.label == "Max Studio" &&
-            PrimaryDestination.GOOGLE.label == "Google"
+            (PrimaryDestination.CHROME.label == "Chrome" || PrimaryDestination.GOOGLE.label == "Chrome")
         record("M03", "Navigation & Adaptive Destinations", navOk,
-            "${PrimaryDestination.entries.size} primary destinations active (Home, Max Studio, Google)")
+            "${PrimaryDestination.entries.size} primary destinations active (Home, Max Studio, Chrome)")
 
         // M04: Project Manager & Templates
         val templatesOk = activeProjectRoot != null && File(activeProjectRoot).exists()

@@ -3,7 +3,12 @@ package com.example.model
 enum class PrimaryDestination(val label: String, val route: String) {
     HOME("Home", "home"),
     MAX_STUDIO("Max Studio", "max_studio"),
-    GOOGLE("Google", "google")
+    CHROME("Chrome", "chrome");
+
+    companion object {
+        @Deprecated("Replaced with CHROME", ReplaceWith("CHROME"))
+        val GOOGLE get() = CHROME
+    }
 }
 
 enum class MaxStudioMode(val label: String) {
@@ -314,3 +319,37 @@ data class BuildRunState(
     val logs: List<String> = emptyList(),
     val succeeded: Boolean? = null
 )
+
+data class ChromeTab(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String = "New Tab",
+    val url: String = "chrome://newtab",
+    val isIncognito: Boolean = false,
+    val favicon: String = "🌐"
+)
+
+data class ChromeNetworkEntry(
+    val id: String = java.util.UUID.randomUUID().toString().take(8),
+    val url: String,
+    val method: String = "GET",
+    val status: Int = 200,
+    val mimeType: String = "text/html",
+    val durationMs: Long = 45L,
+    val timestamp: String = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+)
+
+data class ChromeBookmark(
+    val id: String = java.util.UUID.randomUUID().toString().take(8),
+    val title: String,
+    val url: String,
+    val category: String = "Developer",
+    val icon: String = "⭐"
+)
+
+data class ChromeHistoryEntry(
+    val id: String = java.util.UUID.randomUUID().toString().take(8),
+    val title: String,
+    val url: String,
+    val visitedAt: Long = System.currentTimeMillis()
+)
+
