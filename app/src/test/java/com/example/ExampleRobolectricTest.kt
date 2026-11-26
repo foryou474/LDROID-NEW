@@ -32,7 +32,7 @@ class ExampleRobolectricTest {
     @Test
     fun verifyAppIdentityAndPackage() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        assertEquals("LDROID", context.getString(R.string.app_name))
+        assertEquals("M.A.X. Studio", context.getString(R.string.app_name))
         assertEquals("com.ldroid.ide", context.packageName)
     }
 
@@ -68,7 +68,7 @@ class ExampleRobolectricTest {
     @Test
     fun navigatePrimaryTabsAndDeveloperLab() {
         composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithText("LDROID IDE").assertIsDisplayed()
+        composeTestRule.onNodeWithText("M.A.X. STUDIO").assertIsDisplayed()
 
         // Open Developer Lab -> APK/AAB Analyzer and return
         composeTestRule.onNodeWithTag("home_lazy_column")
@@ -97,5 +97,37 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("settings_lazy_column")
             .performScrollToNode(hasTestTag("view_roadmap_audit_btn"))
         composeTestRule.onNodeWithTag("view_roadmap_audit_btn").assertIsDisplayed()
+    }
+
+    @Test
+    fun editorM55AppBarToolbarAndBottomPanelWork() {
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("nav_editor").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("drawer_menu_btn").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("editor_search_btn").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("editor_more_actions_btn").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("toggle_explorer_btn").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("editor_undo_btn").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("editor_redo_btn").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("editor_save_btn").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("toggle_terminal_btn").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("terminal_command_input").assertIsDisplayed()
+
+        // Toggle Find & Replace overlay via AppBar Search icon
+        composeTestRule.onNodeWithTag("editor_search_btn").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("find_input").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("replace_input").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("replace_all_btn").assertIsDisplayed()
+
+        // Switch bottom tool tabs (Build & Logcat)
+        composeTestRule.onNodeWithText("Build").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Run Build Check").assertIsDisplayed()
+
+        composeTestRule.onNodeWithText("Logcat").performClick()
+        composeTestRule.waitForIdle()
     }
 }

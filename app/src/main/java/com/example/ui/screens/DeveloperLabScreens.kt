@@ -93,7 +93,7 @@ fun DeveloperLabDetailScreen(
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(section.title, color = tokens.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                    Text("${section.milestoneOwner} • ${section.subtitle}", color = tokens.textMuted, fontSize = 11.sp)
+                    Text("${section.categoryTag} • ${section.subtitle}", color = tokens.textMuted, fontSize = 11.sp)
                 }
             }
         }
@@ -360,7 +360,7 @@ fun DeveloperLabDetailScreen(
                                     onClick = { viewModel.analyzeSelfApk() },
                                     modifier = Modifier.weight(1f).testTag("analyze_self_apk_btn")
                                 ) {
-                                    Text("Inspect LDROID APK")
+                                    Text("Inspect App APK", maxLines = 1)
                                 }
                             }
                             if (uiState.isApkAnalyzing) {

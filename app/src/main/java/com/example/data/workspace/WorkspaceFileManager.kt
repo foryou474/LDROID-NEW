@@ -10,6 +10,7 @@ import com.example.data.local.WorkspaceSnapshotEntity
 import com.example.model.FileChangeSummary
 import com.example.model.FileDiffLine
 import com.example.model.FilePreviewKind
+import com.example.model.FindInFilesMatch
 import com.example.model.LineEnding
 import com.example.model.OpenEditorTab
 import com.example.model.ProjectTemplate
@@ -60,12 +61,26 @@ class WorkspaceFileManager(
         const val MAX_ZIP_UNCOMPRESSED_BYTES = 64L * 1024L * 1024L // 64 MB Zip Bomb guard
     }
 
+    suspend fun removeDefaultMainActivityIfExists() = withContext(Dispatchers.IO) {
+        runCatching {
+            workspacesRoot.listFiles()?.filter { it.isDirectory }?.forEach { projDir ->
+                projDir.walkTopDown().filter { it.isFile && it.name == "MainActivity.kt" }.forEach { file ->
+                    val content = runCatching { file.readText() }.getOrDefault("")
+                    if (content.contains("fun MaxStarterScreen()") && content.contains("M.A.X. Studio")) {
+                        file.delete()
+                    }
+                }
+            }
+        }
+    }
+
     suspend fun ensureStarterWorkspaceIfEmpty(): ProjectEntity? = withContext(Dispatchers.IO) {
+        removeDefaultMainActivityIfExists()
         val existing = workspacesRoot.listFiles()?.filter { it.isDirectory }.orEmpty()
         if (existing.isEmpty()) {
             createProjectFromTemplate(
-                name = "NeonCounter",
-                packageName = "com.ldroid.sample.neoncounter",
+                name = "MaxStarterApp",
+                packageName = "com.maxstudio.starter",
                 template = ProjectTemplate.COMPOSE_M3_APP
             )
         } else {
@@ -86,14 +101,14 @@ class WorkspaceFileManager(
 
         when (template) {
             ProjectTemplate.COMPOSE_M3_APP -> writeComposeTemplate(projectDir, cleanName, cleanPkg)
+            ProjectTemplate.JAVA_XML_APP -> writeJavaXmlTemplate(projectDir, cleanName, cleanPkg)
+            ProjectTemplate.FLUTTER_DART -> writeFlutterTemplate(projectDir, cleanName)
+            ProjectTemplate.REACT_NATIVE_TSX -> writeReactNativeTemplate(projectDir, cleanName)
             ProjectTemplate.MULTI_MODULE_KOTLIN -> writeMultiModuleTemplate(projectDir, cleanName, cleanPkg)
             ProjectTemplate.WEB_PREVIEW_SANDBOX -> writeWebSandboxTemplate(projectDir, cleanName)
         }
 
-        val defaultFile = when (template) {
-            ProjectTemplate.WEB_PREVIEW_SANDBOX -> "index.html"
-            else -> "app/src/main/java/${cleanPkg.replace('.', '/')}/MainActivity.kt"
-        }
+        val defaultFile: String? = null
 
         val entity = ProjectEntity(
             id = id,
@@ -103,7 +118,7 @@ class WorkspaceFileManager(
             rootPath = projectDir.absolutePath,
             createdAtMs = now,
             updatedAtMs = now,
-            lastOpenedFile = defaultFile
+            lastOpenedFile = null
         )
         dao.upsertProject(entity)
         saveBaselineSnapshot(entity)
@@ -185,7 +200,11 @@ class WorkspaceFileManager(
             }
         }
 
-    suspend fun saveFileTab(project: ProjectEntity, tab: OpenEditorTab): Result<OpenEditorTab> =
+    suspend fun saveFileTab(
+        project: ProjectEntity,
+        tab: OpenEditorTab,
+        formatOnSave: Boolean = false
+    ): Result<OpenEditorTab> =
         withContext(Dispatchers.IO) {
             runCatching {
                 require(!tab.isLargeFilePreview) {
@@ -197,10 +216,17 @@ class WorkspaceFileManager(
                 val target = resolveSafe(project, tab.relativePath)
                 target.parentFile?.mkdirs()
 
-                val outputText = if (tab.lineEnding == LineEnding.CRLF) {
-                    tab.content.replace("\n", "\r\n")
+                val contentToSave = if (formatOnSave) {
+                    val cleanedLines = tab.content.lines().joinToString("\n") { it.trimEnd() }
+                    if (cleanedLines.isEmpty() || cleanedLines.endsWith("\n")) cleanedLines else "$cleanedLines\n"
                 } else {
                     tab.content
+                }
+
+                val outputText = if (tab.lineEnding == LineEnding.CRLF) {
+                    contentToSave.replace("\n", "\r\n")
+                } else {
+                    contentToSave
                 }
                 val bytes = outputText.toByteArray(Charset.forName(tab.encoding.charsetName))
 
@@ -221,7 +247,11 @@ class WorkspaceFileManager(
                 val now = System.currentTimeMillis()
                 dao.touchProject(project.id, now, tab.relativePath)
                 logOp(project.id, "SAVE", tab.relativePath, "${bytes.size} bytes (${tab.encoding.charsetName})")
-                tab.copy(savedContent = tab.content, totalBytes = bytes.size.toLong())
+                tab.copy(
+                    content = contentToSave,
+                    savedContent = contentToSave,
+                    totalBytes = bytes.size.toLong()
+                )
             }
         }
 
@@ -281,6 +311,100 @@ class WorkspaceFileManager(
                 logOp(project.id, "COPY", srcRel, "-> $destRel")
             }
         }
+
+    suspend fun moveFile(project: ProjectEntity, srcRel: String, destRel: String): Result<String> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val cleanDest = destRel.trim().trimStart('/')
+                require(cleanDest.isNotBlank()) { "Destination cannot be empty" }
+                val src = resolveSafe(project, srcRel)
+                val dst = resolveSafe(project, cleanDest)
+                require(src.exists()) { "Source missing: $srcRel" }
+                require(!dst.exists()) { "Destination already exists: $cleanDest" }
+                dst.parentFile?.mkdirs()
+                val moved = src.renameTo(dst)
+                if (!moved) {
+                    if (src.isDirectory) {
+                        src.copyRecursively(dst, overwrite = false)
+                        src.deleteRecursively()
+                    } else {
+                        src.copyTo(dst, overwrite = false)
+                        src.delete()
+                    }
+                }
+                logOp(project.id, "MOVE", srcRel, "-> $cleanDest")
+                cleanDest
+            }
+        }
+
+    suspend fun searchInFiles(
+        project: ProjectEntity,
+        query: String,
+        ignoreCase: Boolean = true
+    ): List<FindInFilesMatch> = withContext(Dispatchers.IO) {
+        if (query.isEmpty()) return@withContext emptyList()
+        val root = File(project.rootPath)
+        if (!root.exists()) return@withContext emptyList()
+        val results = mutableListOf<FindInFilesMatch>()
+        root.walkTopDown()
+            .filter { it.isFile && !it.name.startsWith(".git") && it.length() <= MAX_EDITABLE_BYTES }
+            .filter { classifyPreviewKind(it.extension.lowercase()) == FilePreviewKind.CODE_TEXT }
+            .forEach { file ->
+                if (results.size >= 200) return@forEach
+                val rel = file.relativeTo(root).path.replace(File.separatorChar, '/')
+                val lines = runCatching { file.readLines() }.getOrNull() ?: return@forEach
+                lines.forEachIndexed { idx, lineText ->
+                    if (results.size < 200 && lineText.contains(query, ignoreCase = ignoreCase)) {
+                        results.add(
+                            FindInFilesMatch(
+                                relativePath = rel,
+                                lineNumber = idx + 1,
+                                lineText = lineText.trim().take(140)
+                            )
+                        )
+                    }
+                }
+            }
+        results
+    }
+
+    suspend fun replaceInFiles(
+        project: ProjectEntity,
+        find: String,
+        replace: String,
+        ignoreCase: Boolean = true
+    ): Result<Pair<Int, List<String>>> = withContext(Dispatchers.IO) {
+        runCatching {
+            require(find.isNotEmpty()) { "Search pattern cannot be empty" }
+            val root = File(project.rootPath)
+            if (!root.exists()) return@runCatching 0 to emptyList()
+            val regex = Regex(
+                Regex.escape(find),
+                if (ignoreCase) setOf(RegexOption.IGNORE_CASE) else emptySet()
+            )
+            val safeReplacement = Regex.escapeReplacement(replace)
+            var totalOccurrences = 0
+            val changedFiles = mutableListOf<String>()
+            root.walkTopDown()
+                .filter { it.isFile && !it.name.startsWith(".git") && it.length() <= MAX_EDITABLE_BYTES }
+                .filter { classifyPreviewKind(it.extension.lowercase()) == FilePreviewKind.CODE_TEXT }
+                .forEach { file ->
+                    val content = runCatching { file.readText() }.getOrNull() ?: return@forEach
+                    val count = regex.findAll(content).count()
+                    if (count > 0) {
+                        val updated = regex.replace(content, safeReplacement)
+                        file.writeText(updated, Charsets.UTF_8)
+                        val rel = file.relativeTo(root).path.replace(File.separatorChar, '/')
+                        changedFiles.add(rel)
+                        totalOccurrences += count
+                    }
+                }
+            if (totalOccurrences > 0) {
+                logOp(project.id, "REPLACE_IN_FILES", "${changedFiles.size} files", "$totalOccurrences replacement(s)")
+            }
+            totalOccurrences to changedFiles
+        }
+    }
 
     suspend fun deletePaths(project: ProjectEntity, relativePaths: List<String>): Result<Int> =
         withContext(Dispatchers.IO) {
@@ -494,6 +618,64 @@ class WorkspaceFileManager(
             snap
         }
 
+    suspend fun restoreFromBaseline(project: ProjectEntity, relativePath: String? = null): Result<Int> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val root = File(project.rootPath)
+                val baselineDir = File(baselinesRoot, project.id)
+                require(baselineDir.exists()) { "No baseline snapshot exists for ${project.name}" }
+                if (relativePath != null) {
+                    val baseFile = resolveWithin(baselineDir, relativePath)
+                    val targetFile = resolveSafe(project, relativePath)
+                    if (baseFile.exists() && baseFile.isFile) {
+                        targetFile.parentFile?.mkdirs()
+                        baseFile.copyTo(targetFile, overwrite = true)
+                        logOp(project.id, "RESTORE_FILE", relativePath, "Restored from baseline snapshot")
+                    } else if (targetFile.exists()) {
+                        targetFile.deleteRecursively()
+                        logOp(project.id, "RESTORE_FILE", relativePath, "Removed added file not in baseline")
+                    } else {
+                        error("File not found in baseline or workspace: $relativePath")
+                    }
+                    dao.touchProject(project.id, System.currentTimeMillis(), relativePath)
+                    1
+                } else {
+                    var restored = 0
+                    val baseFiles = baselineDir.walkTopDown().filter { it.isFile }
+                        .associateBy { it.relativeTo(baselineDir).path.replace(File.separatorChar, '/') }
+                    // Delete workspace files added since baseline (excluding .git)
+                    if (root.exists()) {
+                        root.walkTopDown().filter { it.isFile && !it.name.startsWith(".git") }.forEach { cur ->
+                            val rel = cur.relativeTo(root).path.replace(File.separatorChar, '/')
+                            if (rel !in baseFiles) cur.delete()
+                        }
+                    }
+                    baseFiles.forEach { (rel, baseFile) ->
+                        val dst = resolveSafe(project, rel)
+                        dst.parentFile?.mkdirs()
+                        baseFile.copyTo(dst, overwrite = true)
+                        restored++
+                    }
+                    logOp(project.id, "RESTORE_SNAPSHOT", project.name, "Restored $restored files from baseline")
+                    dao.touchProject(project.id, System.currentTimeMillis(), null)
+                    restored
+                }
+            }
+        }
+
+    private fun resolveWithin(dir: File, relativePath: String): File {
+        val candidate = File(dir, relativePath)
+        val canonicalRoot = dir.canonicalPath
+        val canonicalCandidate = candidate.canonicalPath
+        require(
+            canonicalCandidate == canonicalRoot ||
+                canonicalCandidate.startsWith(canonicalRoot + File.separator)
+        ) {
+            "Blocked path traversal: $relativePath"
+        }
+        return candidate
+    }
+
     suspend fun computeWorkspaceChanges(project: ProjectEntity): List<FileChangeSummary> =
         withContext(Dispatchers.IO) {
             val root = File(project.rootPath)
@@ -595,7 +777,10 @@ class WorkspaceFileManager(
     private fun detectProjectType(root: File): String {
         val files = root.walkTopDown().filter { it.isFile }.map { it.name.lowercase() }.toSet()
         return when {
-            "build.gradle.kts" in files || "build.gradle" in files -> "ANDROID_GRADLE"
+            "pubspec.yaml" in files || files.any { it.endsWith(".dart") } -> "FLUTTER_DART"
+            "app.tsx" in files || ("package.json" in files && files.any { it.endsWith(".tsx") || it.endsWith(".jsx") }) -> "REACT_NATIVE_TSX"
+            ("build.gradle.kts" in files || "build.gradle" in files) && files.any { it.endsWith(".java") } -> "ANDROID_JAVA_XML"
+            "build.gradle.kts" in files || "build.gradle" in files -> "ANDROID_COMPOSE"
             "androidmanifest.xml" in files -> "ANDROID_SOURCE"
             "index.html" in files -> "WEB_SANDBOX"
             files.any { it.endsWith(".kt") || it.endsWith(".java") } -> "KOTLIN_JAVA"
@@ -709,46 +894,6 @@ class WorkspaceFileManager(
             </resources>
         """.trimIndent())
 
-        writeRel(root, "app/src/main/java/$pkgPath/MainActivity.kt", """
-            package $pkg
-
-            import android.os.Bundle
-            import androidx.activity.ComponentActivity
-            import androidx.activity.compose.setContent
-            import androidx.compose.foundation.layout.*
-            import androidx.compose.material3.*
-            import androidx.compose.runtime.*
-            import androidx.compose.ui.Modifier
-            import androidx.compose.ui.unit.dp
-
-            class MainActivity : ComponentActivity() {
-                override fun onCreate(savedInstanceState: Bundle?) {
-                    super.onCreate(savedInstanceState)
-                    setContent {
-                        MaterialTheme {
-                            NeonCounterScreen()
-                        }
-                    }
-                }
-            }
-
-            @Composable
-            fun NeonCounterScreen() {
-                var count by remember { mutableIntStateOf(0) }
-                Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                    Text(text = "$appName Studio", style = MaterialTheme.typography.headlineMedium)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Text(text = "Active Build Counter: ${'$'}count", modifier = Modifier.padding(16.dp))
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Button(onClick = { count++ }) {
-                        Text("Increment Counter")
-                    }
-                }
-            }
-        """.trimIndent())
-
         writeRel(root, "app/src/test/java/$pkgPath/MainUnitTest.kt", """
             package $pkg
 
@@ -822,20 +967,321 @@ class WorkspaceFileManager(
         """.trimIndent())
     }
 
+    private fun writeJavaXmlTemplate(root: File, appName: String, pkg: String) {
+        val pkgPath = pkg.replace('.', '/')
+        writeRel(root, "settings.gradle.kts", """
+            pluginManagement {
+                repositories { google(); mavenCentral(); gradlePluginPortal() }
+            }
+            dependencyResolutionManagement {
+                repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+                repositories { google(); mavenCentral() }
+            }
+            rootProject.name = "$appName"
+            include(":app")
+        """.trimIndent())
+
+        writeRel(root, "build.gradle.kts", """
+            plugins {
+                id("com.android.application") version "8.9.1" apply false
+            }
+        """.trimIndent())
+
+        writeRel(root, "app/build.gradle.kts", """
+            plugins {
+                id("com.android.application")
+            }
+
+            android {
+                namespace = "$pkg"
+                compileSdk = 36
+
+                defaultConfig {
+                    applicationId = "$pkg"
+                    minSdk = 26
+                    targetSdk = 36
+                    versionCode = 1
+                    versionName = "1.0.0"
+                }
+            }
+
+            dependencies {
+                implementation("androidx.appcompat:appcompat:1.7.0")
+                implementation("com.google.android.material:material:1.12.0")
+                testImplementation("junit:junit:4.13.2")
+            }
+        """.trimIndent())
+
+        writeRel(root, "app/src/main/AndroidManifest.xml", """
+            <?xml version="1.0" encoding="utf-8"?>
+            <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+                <application
+                    android:allowBackup="true"
+                    android:label="@string/app_name">
+                    <activity
+                        android:name=".MainActivity"
+                        android:exported="true">
+                        <intent-filter>
+                            <action android:name="android.intent.action.MAIN" />
+                            <category android:name="android.intent.category.LAUNCHER" />
+                        </intent-filter>
+                    </activity>
+                </application>
+            </manifest>
+        """.trimIndent())
+
+        writeRel(root, "app/src/main/res/values/strings.xml", """
+            <resources>
+                <string name="app_name">$appName</string>
+            </resources>
+        """.trimIndent())
+
+        writeRel(root, "app/src/main/res/layout/activity_main.xml", """
+            <?xml version="1.0" encoding="utf-8"?>
+            <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:id="@+id/titleText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="$appName • Java + XML" />
+
+                <TextView
+                    android:id="@+id/counterText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Active Counter: ${'$'}count" />
+
+                <Button
+                    android:id="@+id/incrementButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Increment Counter" />
+            </LinearLayout>
+        """.trimIndent())
+
+        writeRel(root, "app/src/main/java/$pkgPath/MainActivity.java", """
+            package $pkg;
+
+            import android.os.Bundle;
+            import android.widget.Button;
+            import android.widget.TextView;
+            import androidx.appcompat.app.AppCompatActivity;
+
+            public class MainActivity extends AppCompatActivity {
+                private int count = 0;
+
+                @Override
+                protected void onCreate(Bundle savedInstanceState) {
+                    super.onCreate(savedInstanceState);
+                    setContentView(R.layout.activity_main);
+
+                    TextView counterText = findViewById(R.id.counterText);
+                    Button incrementButton = findViewById(R.id.incrementButton);
+                    incrementButton.setOnClickListener(v -> {
+                        count++;
+                        counterText.setText("Active Counter: " + count);
+                    });
+                }
+            }
+        """.trimIndent())
+
+        writeRel(root, "app/src/test/java/$pkgPath/MainUnitTest.java", """
+            package $pkg;
+
+            import org.junit.Test;
+            import static org.junit.Assert.assertEquals;
+
+            public class MainUnitTest {
+                @Test
+                public void verifyAddition() {
+                    assertEquals(4, 2 + 2);
+                }
+            }
+        """.trimIndent())
+    }
+
+    private fun writeFlutterTemplate(root: File, appName: String) {
+        val snakeName = appName.lowercase().replace(Regex("""[^a-z0-9_]"""), "_").ifBlank { "max_flutter_app" }
+        writeRel(root, "pubspec.yaml", """
+            name: $snakeName
+            description: "$appName built with M.A.X. Studio"
+            version: 1.0.0+1
+
+            environment:
+              sdk: ">=3.4.0 <4.0.0"
+
+            dependencies:
+              flutter:
+                sdk: flutter
+              cupertino_icons: ^1.0.8
+        """.trimIndent())
+
+        writeRel(root, "lib/main.dart", """
+            import 'package:flutter/material.dart';
+
+            void main() {
+              runApp(const MaxFlutterApp());
+            }
+
+            class MaxFlutterApp extends StatelessWidget {
+              const MaxFlutterApp({super.key});
+
+              @override
+              Widget build(BuildContext context) {
+                return MaterialApp(
+                  title: '$appName',
+                  theme: ThemeData.dark(useMaterial3: true),
+                  home: const HomeScreen(),
+                );
+              }
+            }
+
+            class HomeScreen extends StatefulWidget {
+              const HomeScreen({super.key});
+
+              @override
+              State<HomeScreen> createState() => _HomeScreenState();
+            }
+
+            class _HomeScreenState extends State<HomeScreen> {
+              int _counter = 0;
+
+              @override
+              Widget build(BuildContext context) {
+                return Scaffold(
+                  appBar: AppBar(title: const Text('$appName • Flutter')),
+                  body: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Card(
+                          child: Padding(
+                            padding: EdgeInsets.all(16),
+                            child: Text('Flutter Material 3 Workspace'),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text('Tap Counter: ${'$'}_counter'),
+                        const SizedBox(height: 12),
+                        ElevatedButton(
+                          onPressed: () => setState(() => _counter++),
+                          child: const Text('Increment Counter'),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+            }
+        """.trimIndent())
+
+        writeRel(root, "test/widget_test.dart", """
+            void main() {
+              // Add Flutter widget tests here
+            }
+        """.trimIndent())
+
+        writeRel(root, "README.md", """
+            # $appName
+
+            Flutter (Dart) starter workspace created in M.A.X. Studio.
+        """.trimIndent())
+    }
+
+    private fun writeReactNativeTemplate(root: File, appName: String) {
+        val pkgName = appName.lowercase().replace(Regex("""[^a-z0-9-]"""), "-").ifBlank { "max-rn-app" }
+        writeRel(root, "package.json", """
+            {
+              "name": "$pkgName",
+              "version": "1.0.0",
+              "main": "index.js",
+              "scripts": {
+                "start": "expo start",
+                "android": "expo start --android"
+              },
+              "dependencies": {
+                "react": "18.3.1",
+                "react-native": "0.76.5"
+              },
+              "devDependencies": {
+                "typescript": "^5.6.3"
+              }
+            }
+        """.trimIndent())
+
+        writeRel(root, "tsconfig.json", """
+            {
+              "compilerOptions": {
+                "target": "ES2020",
+                "moduleResolution": "bundler",
+                "jsx": "react-native",
+                "strict": true
+              }
+            }
+        """.trimIndent())
+
+        writeRel(root, "App.tsx", """
+            import React, { useState } from 'react';
+            import { SafeAreaView, View, Text, TouchableOpacity, Switch, StyleSheet } from 'react-native';
+
+            export default function App(): React.JSX.Element {
+              const [count, setCount] = useState<number>(0);
+              const [enabled, setEnabled] = useState<boolean>(true);
+
+              return (
+                <SafeAreaView style={styles.container}>
+                  <Text style={styles.title}>$appName • React Native</Text>
+                  <View style={styles.card}>
+                    <Text style={styles.counter}>Active Counter: {count}</Text>
+                  </View>
+                  <Switch value={enabled} onValueChange={setEnabled} />
+                  <TouchableOpacity style={styles.button} onPress={() => setCount(c => c + 1)}>
+                    <Text style={styles.buttonText}>Increment Counter</Text>
+                  </TouchableOpacity>
+                </SafeAreaView>
+              );
+            }
+
+            const styles = StyleSheet.create({
+              container: { flex: 1, padding: 20, backgroundColor: '#070B14' },
+              title: { fontSize: 20, fontWeight: '700', color: '#00E5FF', marginBottom: 12 },
+              card: { padding: 16, borderRadius: 12, backgroundColor: '#111B2D', marginBottom: 12 },
+              counter: { fontSize: 16, color: '#F4F7FF' },
+              button: { padding: 14, borderRadius: 12, backgroundColor: '#00E5FF', alignItems: 'center' },
+              buttonText: { fontWeight: '700', color: '#050810' }
+            });
+        """.trimIndent())
+
+        writeRel(root, "index.js", """
+            import { AppRegistry } from 'react-native';
+            import App from './App';
+
+            AppRegistry.registerComponent('$appName', () => App);
+        """.trimIndent())
+    }
+
     private fun writeWebSandboxTemplate(root: File, appName: String) {
         writeRel(root, "index.html", """
             <!DOCTYPE html>
             <html lang="en">
             <head>
               <meta charset="UTF-8" />
-              <title>$appName Preview</title>
+              <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+              <title>$appName</title>
               <link rel="stylesheet" href="styles.css" />
             </head>
             <body>
               <main class="card">
-                <h1>$appName Workspace</h1>
-                <p>Ready for live HTML/CSS/JSON editing in LDROID.</p>
-                <button id="pingBtn">Run Action</button>
+                <h1>$appName</h1>
+                <p>Interactive HTML5, CSS3 &amp; JavaScript workspace in M.A.X. Studio.</p>
+                <p class="counter">Clicks: <strong id="countVal">0</strong></p>
+                <button id="pingBtn">Increment Counter</button>
               </main>
               <script src="app.js"></script>
             </body>
@@ -843,9 +1289,10 @@ class WorkspaceFileManager(
         """.trimIndent())
         writeRel(root, "styles.css", """
             body {
+              margin: 0;
               background: #070B14;
               color: #F4F7FF;
-              font-family: sans-serif;
+              font-family: system-ui, sans-serif;
               padding: 24px;
             }
             .card {
@@ -854,17 +1301,31 @@ class WorkspaceFileManager(
               border-radius: 16px;
               padding: 20px;
             }
+            h1 { color: #00E5FF; margin-top: 0; }
+            .counter { color: #35D49A; font-size: 16px; }
+            button {
+              background: #00E5FF;
+              color: #050810;
+              border: none;
+              border-radius: 10px;
+              padding: 12px 18px;
+              font-weight: 700;
+              cursor: pointer;
+            }
         """.trimIndent())
         writeRel(root, "app.js", """
+            let count = 0;
+            const valEl = document.getElementById("countVal");
             document.getElementById("pingBtn")?.addEventListener("click", () => {
-              console.log("LDROID sandbox action triggered");
+              count += 1;
+              if (valEl) valEl.textContent = String(count);
             });
         """.trimIndent())
         writeRel(root, "manifest.json", """
             {
               "name": "$appName",
               "version": "1.0.0",
-              "offlineFirst": true
+              "framework": "html5-css-js"
             }
         """.trimIndent())
     }

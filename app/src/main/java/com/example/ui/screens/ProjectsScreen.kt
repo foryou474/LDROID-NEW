@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,11 +11,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
@@ -22,6 +26,8 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderZip
+import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -72,20 +78,32 @@ fun ProjectsScreen(
 ) {
     val tokens = LocalLdroidTokens.current
     var showCreateDialog by remember { mutableStateOf(false) }
+    var showRollbackConfirm by remember { mutableStateOf(false) }
     var projectToDelete by remember { mutableStateOf<ProjectEntity?>(null) }
+    var projectSearchQuery by remember { mutableStateOf("") }
     var repoInput by remember { mutableStateOf("octocat/Hello-World") }
+
+    val filteredProjects = remember(uiState.projects, projectSearchQuery) {
+        val q = projectSearchQuery.trim().lowercase()
+        if (q.isEmpty()) uiState.projects
+        else uiState.projects.filter {
+            it.name.lowercase().contains(q) ||
+                it.packageName.lowercase().contains(q) ||
+                it.projectType.lowercase().contains(q)
+        }
+    }
 
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
             .background(tokens.background),
         contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
             SectionHeader(
                 title = "Projects & Templates",
-                subtitle = "Create offline Android/Kotlin workspaces, import SAF files/ZIPs, and inspect Git diffs",
+                subtitle = "Create workspaces, import code archives, or compare local changes",
                 trailing = {
                     Button(
                         onClick = { showCreateDialog = true },
@@ -95,13 +113,13 @@ fun ProjectsScreen(
                     ) {
                         Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.size(4.dp))
-                        Text("New", fontWeight = FontWeight.SemiBold)
+                        Text("New", fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                     }
                 }
             )
         }
 
-        // SAF Import / Export Actions
+        // Import / Export Actions (compact padding & single-line text to prevent clipping)
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -110,22 +128,24 @@ fun ProjectsScreen(
                 OutlinedButton(
                     onClick = onImportZipClick,
                     modifier = Modifier.weight(1f).height(48.dp).testTag("projects_import_zip_btn"),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
                     shape = RoundedCornerShape(12.dp),
                     border = BorderStroke(1.dp, tokens.border)
                 ) {
-                    Icon(Icons.Filled.FolderZip, contentDescription = null, tint = tokens.primaryAccent, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text("Import ZIP", color = tokens.textPrimary, fontSize = 12.sp)
+                    Icon(Icons.Filled.FolderZip, contentDescription = null, tint = tokens.primaryAccent, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.size(4.dp))
+                    Text("Import ZIP", color = tokens.textPrimary, fontSize = 11.sp, maxLines = 1, softWrap = false)
                 }
                 OutlinedButton(
                     onClick = onImportFilesClick,
                     modifier = Modifier.weight(1f).height(48.dp).testTag("projects_import_files_btn"),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
                     shape = RoundedCornerShape(12.dp),
                     border = BorderStroke(1.dp, tokens.border)
                 ) {
-                    Icon(Icons.Filled.UploadFile, contentDescription = null, tint = tokens.secondaryAccent, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text("Add Files", color = tokens.textPrimary, fontSize = 12.sp)
+                    Icon(Icons.Filled.UploadFile, contentDescription = null, tint = tokens.secondaryAccent, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.size(4.dp))
+                    Text("Add Files", color = tokens.textPrimary, fontSize = 11.sp, maxLines = 1, softWrap = false)
                 }
                 OutlinedButton(
                     onClick = {
@@ -134,12 +154,13 @@ fun ProjectsScreen(
                     },
                     enabled = uiState.activeProject != null,
                     modifier = Modifier.weight(1f).height(48.dp).testTag("projects_export_zip_btn"),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
                     shape = RoundedCornerShape(12.dp),
                     border = BorderStroke(1.dp, tokens.border)
                 ) {
-                    Icon(Icons.Filled.Archive, contentDescription = null, tint = tokens.success, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text("Export ZIP", color = tokens.textPrimary, fontSize = 12.sp)
+                    Icon(Icons.Filled.Archive, contentDescription = null, tint = tokens.success, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.size(4.dp))
+                    Text("Export ZIP", color = tokens.textPrimary, fontSize = 11.sp, maxLines = 1, softWrap = false)
                 }
             }
         }
@@ -168,8 +189,22 @@ fun ProjectsScreen(
             }
         }
 
+        // Project Search Filter
+        if (uiState.projects.size > 1 || projectSearchQuery.isNotEmpty()) {
+            item {
+                OutlinedTextField(
+                    value = projectSearchQuery,
+                    onValueChange = { projectSearchQuery = it },
+                    placeholder = { Text("Filter projects by name, package, or type...", fontSize = 12.sp) },
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, tint = tokens.textMuted) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("projects_search_input")
+                )
+            }
+        }
+
         // Project List
-        items(uiState.projects, key = { it.id }) { proj ->
+        items(filteredProjects, key = { it.id }) { proj ->
             val isActive = uiState.activeProject?.id == proj.id
             LdroidSurfaceCard(
                 accentBorder = isActive,
@@ -204,16 +239,32 @@ fun ProjectsScreen(
             }
         }
 
-        // Local Git / Baseline Diff & Snapshots (M18 / M25)
+        // Workspace Diff & Snapshots
         item {
             SectionHeader(
-                title = "Workspace Diff & Snapshots",
-                subtitle = "Compare uncommitted changes against baseline snapshot (M18 / M25)",
+                title = "Snapshots & Diff",
+                subtitle = "Compare or restore saved workspace checkpoints",
                 trailing = {
-                    OutlinedButton(onClick = { viewModel.createWorkspaceSnapshot() }) {
-                        Icon(Icons.Filled.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.size(4.dp))
-                        Text("Snapshot")
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (uiState.workspaceChanges.isNotEmpty()) {
+                            OutlinedButton(
+                                onClick = { showRollbackConfirm = true },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.testTag("projects_rollback_all_btn")
+                            ) {
+                                Icon(Icons.Filled.Restore, contentDescription = null, modifier = Modifier.size(15.dp), tint = tokens.warning)
+                                Spacer(Modifier.size(4.dp))
+                                Text("Rollback", color = tokens.warning, fontSize = 11.sp, maxLines = 1, softWrap = false)
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = { viewModel.createWorkspaceSnapshot() },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Icon(Icons.Filled.CameraAlt, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.size(4.dp))
+                            Text("Snapshot", fontSize = 11.sp, maxLines = 1, softWrap = false)
+                        }
                     }
                 }
             )
@@ -248,14 +299,22 @@ fun ProjectsScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        StatusPill(
-                            change.status,
-                            when (change.status) {
-                                "ADDED" -> tokens.success
-                                "DELETED" -> tokens.error
-                                else -> tokens.warning
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            StatusPill(
+                                change.status,
+                                when (change.status) {
+                                    "ADDED" -> tokens.success
+                                    "DELETED" -> tokens.error
+                                    else -> tokens.warning
+                                }
+                            )
+                            IconButton(
+                                onClick = { viewModel.restoreSnapshotFile(change.relativePath) },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.Filled.Restore, contentDescription = "Revert ${change.relativePath}", tint = tokens.primaryAccent, modifier = Modifier.size(18.dp))
                             }
-                        )
+                        }
                     }
                     Spacer(Modifier.height(8.dp))
                     DiffLinesBlock(change.diffLines.take(40))
@@ -271,11 +330,11 @@ fun ProjectsScreen(
             }
         }
 
-        // GitHub Repository & Actions Inspector (M18 / M14)
+        // GitHub Repository & Actions Inspector
         item {
             SectionHeader(
-                title = "GitHub & Actions Inspector",
-                subtitle = "Query real repository metadata and GitHub Actions workflow runs"
+                title = "GitHub Inspector",
+                subtitle = "Check repository details, recent commits & CI status"
             )
         }
 
@@ -304,11 +363,43 @@ fun ProjectsScreen(
                     Spacer(Modifier.height(8.dp))
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
+                uiState.gitHubError?.let { err ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(err, color = tokens.error, fontSize = 11.sp)
+                }
                 uiState.gitHubStatus?.let { gh ->
                     Spacer(Modifier.height(10.dp))
                     Text(gh.fullName, color = tokens.primaryAccent, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    Text("Default branch: ${gh.defaultBranch} • Stars: ${gh.stars} • Open issues: ${gh.openIssues}", color = tokens.textMuted, fontSize = 12.sp)
-                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Branch: ${gh.inspectedBranch} (default: ${gh.defaultBranch}) • Stars: ${gh.stars} • Forks: ${gh.forks} • Open issues: ${gh.openIssues}",
+                        color = tokens.textMuted,
+                        fontSize = 12.sp
+                    )
+                    if (gh.recentCommits.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("Recent Commits (${gh.inspectedBranch})", color = tokens.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(4.dp))
+                        gh.recentCommits.forEach { commit ->
+                            Surface(
+                                color = tokens.surface2,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(commit.sha, color = tokens.info, fontFamily = JetBrainsMonoFontFamily, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text(commit.message, color = tokens.textPrimary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                    Text(commit.author, color = tokens.textMuted, fontSize = 10.sp, maxLines = 1)
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text("Recent CI Runs", color = tokens.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(4.dp))
                     if (gh.recentWorkflowRuns.isEmpty()) {
                         Text("No recent workflow runs returned.", color = tokens.textMuted, fontSize = 12.sp)
                     } else {
@@ -331,6 +422,28 @@ fun ProjectsScreen(
                 }
             }
         }
+    }
+
+    if (showRollbackConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRollbackConfirm = false },
+            title = { Text("Rollback Workspace?") },
+            text = {
+                Text("Restore all ${uiState.workspaceChanges.size} modified/added/deleted file(s) to the latest baseline snapshot?")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.restoreFullSnapshot()
+                        showRollbackConfirm = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = tokens.warning, contentColor = tokens.onPrimaryAccent)
+                ) { Text("Rollback All") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRollbackConfirm = false }) { Text("Cancel") }
+            }
+        )
     }
 
     if (showCreateDialog) {
@@ -369,15 +482,22 @@ private fun CreateProjectDialog(
     onDismiss: () -> Unit,
     onCreate: (String, String, ProjectTemplate) -> Unit
 ) {
-    var name by remember { mutableStateOf("PulseApp") }
-    var pkg by remember { mutableStateOf("com.ldroid.pulseapp") }
+    val tokens = LocalLdroidTokens.current
+    var name by remember { mutableStateOf("MaxPulseApp") }
+    var pkg by remember { mutableStateOf("com.maxstudio.pulseapp") }
     var selectedTemplate by remember { mutableStateOf(ProjectTemplate.COMPOSE_M3_APP) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Create Workspace") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -388,17 +508,56 @@ private fun CreateProjectDialog(
                 OutlinedTextField(
                     value = pkg,
                     onValueChange = { pkg = it },
-                    label = { Text("Package Name") },
+                    label = { Text("Package / Bundle ID") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "Starter Template",
+                    color = tokens.textMuted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
                 ProjectTemplate.entries.forEach { tpl ->
-                    FilterChip(
-                        selected = selectedTemplate == tpl,
-                        onClick = { selectedTemplate = tpl },
-                        label = { Text("${tpl.title} (${tpl.badge})") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    val isSelected = selectedTemplate == tpl
+                    Surface(
+                        color = if (isSelected) tokens.primaryAccent.copy(alpha = 0.14f) else tokens.surface2,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, if (isSelected) tokens.primaryAccent else tokens.border),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectedTemplate = tpl }
+                            .testTag("template_${tpl.name.lowercase()}")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = tpl.title,
+                                    color = if (isSelected) tokens.primaryAccent else tokens.textPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                StatusPill(
+                                    label = tpl.badge,
+                                    color = if (isSelected) tokens.primaryAccent else tokens.secondaryAccent
+                                )
+                            }
+                            Text(
+                                text = tpl.description,
+                                color = tokens.textMuted,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
                 }
             }
         },

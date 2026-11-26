@@ -21,40 +21,54 @@ object VisualBuilderCodegen {
     )
 
     val starterVisualNodes = listOf(
-        VisualNode("n1", VisualComponentType.TEXT, "LDROID Visual Screen", "headlineMedium", 12, useAccent = false),
-        VisualNode("n2", VisualComponentType.CARD, "Telemetry Summary", "Live state ready", 16, useAccent = false),
-        VisualNode("n3", VisualComponentType.TEXT_FIELD, "Project Endpoint", "https://api.example.com", 12, useAccent = false),
-        VisualNode("n4", VisualComponentType.SWITCH_CONTROL, "Offline Cache Enabled", "true", 12, useAccent = true),
-        VisualNode("n5", VisualComponentType.BUTTON, "Deploy Build", "", 12, useAccent = true)
+        VisualNode("n1", VisualComponentType.TEXT, "M.A.X. Studio Canvas", "headlineMedium", 12, useAccent = false, colorTag = "Cyan"),
+        VisualNode("n2", VisualComponentType.CARD, "System Telemetry", "Modular AI eXecutor active", 14, useAccent = false, colorTag = "Default"),
+        VisualNode("n3", VisualComponentType.COUNTER, "Active Counter", "Tap + or - to update state", 12, useAccent = true, colorTag = "Cyan"),
+        VisualNode("n4", VisualComponentType.BUTTON, "Deploy Build", "", 12, useAccent = true, colorTag = "Emerald")
     )
 
     fun generateComposeKotlin(packageName: String, screenName: String, nodes: List<VisualNode>): String {
-        val cleanPkg = packageName.ifBlank { "com.ldroid.app" }
-        val cleanFn = screenName.replace(Regex("""[^A-Za-z0-9_]"""), "").ifBlank { "GeneratedScreen" }
+        val cleanPkg = packageName.ifBlank { "com.maxstudio.app" }
+        val cleanFn = screenName.replace(Regex("""[^A-Za-z0-9_]"""), "").ifBlank { "VisualGeneratedScreen" }
+        val hasCounter = nodes.any { it.type == VisualComponentType.COUNTER }
+        val hasField = nodes.any { it.type == VisualComponentType.TEXT_FIELD }
+        val hasSwitch = nodes.any { it.type == VisualComponentType.SWITCH_CONTROL }
+        val hasColor = nodes.any { it.colorTag != "Default" }
+
         return buildString {
             appendLine("package $cleanPkg")
             appendLine()
             appendLine("import androidx.compose.foundation.layout.*")
             appendLine("import androidx.compose.material3.*")
             appendLine("import androidx.compose.runtime.*")
+            appendLine("import androidx.compose.ui.Alignment")
             appendLine("import androidx.compose.ui.Modifier")
+            if (hasColor) {
+                appendLine("import androidx.compose.ui.graphics.Color")
+            }
             appendLine("import androidx.compose.ui.unit.dp")
             appendLine()
             appendLine("@Composable")
             appendLine("fun $cleanFn() {")
-            appendLine("    var inputText by remember { mutableStateOf(\"\") }")
-            appendLine("    var switchEnabled by remember { mutableStateOf(true) }")
+            if (hasCounter) appendLine("    var count by remember { mutableIntStateOf(0) }")
+            if (hasField) appendLine("    var inputText by remember { mutableStateOf(\"\") }")
+            if (hasSwitch) appendLine("    var switchEnabled by remember { mutableStateOf(true) }")
             appendLine("    Column(")
             appendLine("        modifier = Modifier.fillMaxSize().padding(16.dp),")
             appendLine("        verticalArrangement = Arrangement.spacedBy(12.dp)")
             appendLine("    ) {")
             for (node in nodes) {
+                val colorExpr = colorExpressionForTag(node.colorTag)
                 when (node.type) {
-                    VisualComponentType.TEXT -> appendLine(
-                        "        Text(text = \"${escape(node.label)}\", style = MaterialTheme.typography.titleMedium)"
-                    )
+                    VisualComponentType.TEXT -> {
+                        val colorArg = if (colorExpr != null) ", color = $colorExpr" else ""
+                        appendLine(
+                            "        Text(text = \"${escape(node.label)}\", style = MaterialTheme.typography.titleMedium$colorArg, modifier = Modifier.padding(${node.paddingDp}.dp))"
+                        )
+                    }
                     VisualComponentType.CARD -> {
-                        appendLine("        Card(modifier = Modifier.fillMaxWidth()) {")
+                        val containerArg = if (colorExpr != null) ", colors = CardDefaults.cardColors(containerColor = $colorExpr.copy(alpha = 0.14f))" else ""
+                        appendLine("        Card(modifier = Modifier.fillMaxWidth()$containerArg) {")
                         appendLine("            Column(modifier = Modifier.padding(${node.paddingDp}.dp)) {")
                         appendLine("                Text(\"${escape(node.label)}\", style = MaterialTheme.typography.titleSmall)")
                         if (node.secondaryText.isNotBlank()) {
@@ -63,21 +77,47 @@ object VisualBuilderCodegen {
                         appendLine("            }")
                         appendLine("        }")
                     }
-                    VisualComponentType.BUTTON -> appendLine(
-                        "        Button(onClick = { }, modifier = Modifier.fillMaxWidth()) { Text(\"${escape(node.label)}\") }"
-                    )
+                    VisualComponentType.BUTTON -> {
+                        val btnColors = if (colorExpr != null) ", colors = ButtonDefaults.buttonColors(containerColor = $colorExpr)" else ""
+                        appendLine(
+                            "        Button(onClick = { }, modifier = Modifier.fillMaxWidth().padding(${node.paddingDp}.dp)$btnColors) { Text(\"${escape(node.label)}\") }"
+                        )
+                    }
+                    VisualComponentType.COUNTER -> {
+                        appendLine("        Card(modifier = Modifier.fillMaxWidth()) {")
+                        appendLine("            Row(")
+                        appendLine("                modifier = Modifier.fillMaxWidth().padding(${node.paddingDp}.dp),")
+                        appendLine("                horizontalArrangement = Arrangement.SpaceBetween,")
+                        appendLine("                verticalAlignment = Alignment.CenterVertically")
+                        appendLine("            ) {")
+                        appendLine("                Text(\"${escape(node.label)}: \$count\", style = MaterialTheme.typography.titleSmall)")
+                        appendLine("                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {")
+                        appendLine("                    OutlinedButton(onClick = { if (count > 0) count-- }) { Text(\"-\") }")
+                        appendLine("                    Button(onClick = { count++ }) { Text(\"+\") }")
+                        appendLine("                }")
+                        appendLine("            }")
+                        appendLine("        }")
+                    }
                     VisualComponentType.TEXT_FIELD -> appendLine(
-                        "        OutlinedTextField(value = inputText, onValueChange = { inputText = it }, label = { Text(\"${escape(node.label)}\") }, modifier = Modifier.fillMaxWidth())"
+                        "        OutlinedTextField(value = inputText, onValueChange = { inputText = it }, label = { Text(\"${escape(node.label)}\") }, modifier = Modifier.fillMaxWidth().padding(vertical = ${(node.paddingDp / 2).coerceAtLeast(2)}.dp))"
                     )
                     VisualComponentType.SWITCH_CONTROL -> {
-                        appendLine("        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {")
+                        appendLine("        Row(modifier = Modifier.fillMaxWidth().padding(${node.paddingDp}.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {")
                         appendLine("            Text(\"${escape(node.label)}\")")
                         appendLine("            Switch(checked = switchEnabled, onCheckedChange = { switchEnabled = it })")
                         appendLine("        }")
                     }
                     VisualComponentType.SPACER -> appendLine("        Spacer(modifier = Modifier.height(${node.paddingDp}.dp))")
-                    VisualComponentType.COLUMN -> appendLine("        Column(modifier = Modifier.padding(${node.paddingDp}.dp)) { Text(\"${escape(node.label)}\") }")
-                    VisualComponentType.ROW -> appendLine("        Row(modifier = Modifier.padding(${node.paddingDp}.dp)) { Text(\"${escape(node.label)}\") }")
+                    VisualComponentType.COLUMN -> {
+                        appendLine("        Column(modifier = Modifier.fillMaxWidth().padding(${node.paddingDp}.dp)) {")
+                        appendLine("            Text(\"${escape(node.label)}\")")
+                        appendLine("        }")
+                    }
+                    VisualComponentType.ROW -> {
+                        appendLine("        Row(modifier = Modifier.fillMaxWidth().padding(${node.paddingDp}.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {")
+                        appendLine("            Text(\"${escape(node.label)}\")")
+                        appendLine("        }")
+                    }
                 }
             }
             appendLine("    }")
@@ -94,7 +134,7 @@ object VisualBuilderCodegen {
         appendLine("""    android:padding="16dp">""")
         for (node in nodes) {
             when (node.type) {
-                VisualComponentType.TEXT, VisualComponentType.CARD -> appendLine(
+                VisualComponentType.TEXT, VisualComponentType.CARD, VisualComponentType.COUNTER -> appendLine(
                     """    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="${node.paddingDp}dp" android:text="${escapeXml(node.label)}" />"""
                 )
                 VisualComponentType.BUTTON -> appendLine(
@@ -133,6 +173,15 @@ object VisualBuilderCodegen {
             nodes.add(ArchitectureNode(f.nameWithoutExtension, kind, 1))
         }
         return nodes.distinctBy { it.name + it.kind }
+    }
+
+    private fun colorExpressionForTag(tag: String): String? = when (tag) {
+        "Cyan" -> "Color(0xFF00E5FF)"
+        "Purple" -> "Color(0xFF9E7CFF)"
+        "Emerald" -> "Color(0xFF35D49A)"
+        "Amber" -> "Color(0xFFFFBF5A)"
+        "Rose" -> "Color(0xFFFF5577)"
+        else -> null
     }
 
     private fun escape(s: String): String = s.replace("\\", "\\\\").replace("\"", "\\\"")

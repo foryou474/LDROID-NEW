@@ -4,23 +4,23 @@ enum class PrimaryDestination(val label: String, val route: String) {
     HOME("Home", "home"),
     PROJECTS("Projects", "projects"),
     EDITOR("Editor", "editor"),
-    AI_STUDIO("AI Studio", "ai_studio"),
+    AI_STUDIO("M.A.X. AI", "ai_studio"),
     SETTINGS("Settings", "settings")
 }
 
 enum class DeveloperLabSection(
     val title: String,
     val subtitle: String,
-    val milestoneOwner: String
+    val categoryTag: String
 ) {
-    DEVICE_LAB("Device Lab", "Profiles, resolution, DPI, orientation & device state", "M15"),
-    LIVE_PREVIEW("Live Preview", "Code Live Preview & Visual UI Live Preview", "M08 / M15"),
-    DEBUGGER_LOGCAT("Debugger & Logcat", "Live process logs, filters & stack-trace explorer", "M16"),
-    PERFORMANCE_PROFILER("Performance Profiler", "JVM heap, native RAM, CPU cores & frame metrics", "M24"),
-    TESTING_LAB("Android Testing Lab", "Static lint, XML/JSON/Kotlin validation & QA suite", "M20 / M23"),
-    APK_ANALYZER("APK/AAB Analyzer", "Real ZIP, DEX, Manifest, certs, size & ABI breakdown", "M17"),
-    BUILD_DIAGNOSTICS("Build Diagnostics", "Gradle, version catalog & dependency graph scanner", "M14 / M42"),
-    SDK_ADB_DIAGNOSTICS("SDK & ADB Diagnostics", "Toolchain, binaries, ART/JVM & virtualization probe", "M12")
+    DEVICE_LAB("Device Lab", "Profiles, resolution, DPI, orientation & device state", "Devices"),
+    LIVE_PREVIEW("Live Preview", "Interactive Compose, XML & HTML real-time preview", "Preview"),
+    DEBUGGER_LOGCAT("Debugger & Logcat", "Live process logs, filters & stack-trace explorer", "Logs"),
+    PERFORMANCE_PROFILER("Performance Profiler", "JVM heap, native RAM, CPU cores & frame metrics", "Profiler"),
+    TESTING_LAB("Android Testing Lab", "Static lint, XML/JSON/Kotlin validation & QA suite", "Testing"),
+    APK_ANALYZER("APK/AAB Analyzer", "Inspect ZIP entries, DEX, Manifest, certs & ABIs", "Packages"),
+    BUILD_DIAGNOSTICS("Build Diagnostics", "Gradle scripts, version catalog & module scanner", "Build"),
+    SDK_ADB_DIAGNOSTICS("SDK & Shell Probe", "Toolchain binaries, ART/JVM & environment check", "Toolchain")
 }
 
 enum class ProjectTemplate(
@@ -30,22 +30,40 @@ enum class ProjectTemplate(
     val projectType: String
 ) {
     COMPOSE_M3_APP(
-        title = "Compose Material 3 App",
-        badge = "Android Kotlin",
-        description = "Full Gradle Kotlin DSL app with MainActivity, Theme, strings.xml & unit tests",
+        title = "Kotlin Jetpack Compose",
+        badge = "Kotlin",
+        description = "Material 3 Compose app with MainActivity.kt, state & unit tests",
         projectType = "ANDROID_COMPOSE"
     ),
-    MULTI_MODULE_KOTLIN(
-        title = "Multi-Module Android Workspace",
-        badge = "M42 Multi-Module",
-        description = "App + :core:model module with gradle/libs.versions.toml & CI workflow",
-        projectType = "MULTI_MODULE"
+    JAVA_XML_APP(
+        title = "Java + XML",
+        badge = "Android Java",
+        description = "AppCompatActivity MainActivity.java paired with activity_main.xml",
+        projectType = "ANDROID_JAVA_XML"
+    ),
+    FLUTTER_DART(
+        title = "Flutter (Dart)",
+        badge = "Dart / Flutter",
+        description = "Cross-platform Material widget app with lib/main.dart & pubspec.yaml",
+        projectType = "FLUTTER_DART"
+    ),
+    REACT_NATIVE_TSX(
+        title = "React Native (TSX)",
+        badge = "TSX / JS",
+        description = "TypeScript mobile UI with App.tsx, hooks & package.json",
+        projectType = "REACT_NATIVE_TSX"
     ),
     WEB_PREVIEW_SANDBOX(
-        title = "Web & JSON/XML Sandbox",
-        badge = "Markup / JS",
-        description = "Lightweight HTML, CSS, JavaScript & JSON workspace for instant inspection",
+        title = "HTML5 / CSS / JS Web App",
+        badge = "HTML / CSS / JS",
+        description = "Interactive HTML5, CSS3 & JavaScript web workspace",
         projectType = "WEB_SANDBOX"
+    ),
+    MULTI_MODULE_KOTLIN(
+        title = "Multi-Module Kotlin",
+        badge = "Multi-Module",
+        description = "App + :core:model module with version catalog & CI workflow",
+        projectType = "MULTI_MODULE"
     )
 }
 
@@ -103,11 +121,12 @@ data class DiagnosticIssue(
 )
 
 enum class VisualComponentType(val displayName: String) {
+    TEXT("Text"),
+    BUTTON("Button"),
     COLUMN("Column"),
     ROW("Row"),
     CARD("Card"),
-    TEXT("Text"),
-    BUTTON("Button"),
+    COUNTER("Counter"),
     TEXT_FIELD("OutlinedTextField"),
     SWITCH_CONTROL("Switch"),
     SPACER("Spacer")
@@ -119,7 +138,8 @@ data class VisualNode(
     val label: String,
     val secondaryText: String = "",
     val paddingDp: Int = 12,
-    val useAccent: Boolean = false
+    val useAccent: Boolean = false,
+    val colorTag: String = "Default"
 )
 
 data class DeviceProfile(
@@ -142,23 +162,43 @@ data class CodePreviewState(
 
 enum class AiProviderType(
     val displayName: String,
+    val shortName: String,
     val defaultModel: String,
+    val defaultFastModel: String,
+    val defaultProModel: String,
     val defaultBaseUrl: String
 ) {
     GEMINI(
         displayName = "Google Gemini",
+        shortName = "Google",
         defaultModel = "gemini-2.5-flash",
+        defaultFastModel = "gemini-2.5-flash",
+        defaultProModel = "gemini-2.5-pro",
         defaultBaseUrl = "https://generativelanguage.googleapis.com"
     ),
     OPENAI_COMPATIBLE(
-        displayName = "OpenAI / Compatible",
+        displayName = "OpenAI",
+        shortName = "OpenAI",
         defaultModel = "gpt-4o-mini",
+        defaultFastModel = "gpt-4o-mini",
+        defaultProModel = "gpt-4o",
         defaultBaseUrl = "https://api.openai.com"
     ),
     ANTHROPIC(
         displayName = "Anthropic Claude",
-        defaultModel = "claude-3-5-sonnet-latest",
+        shortName = "Anthropic",
+        defaultModel = "claude-3-5-haiku-latest",
+        defaultFastModel = "claude-3-5-haiku-latest",
+        defaultProModel = "claude-3-5-sonnet-latest",
         defaultBaseUrl = "https://api.anthropic.com"
+    ),
+    CUSTOM(
+        displayName = "Custom API",
+        shortName = "Custom",
+        defaultModel = "openai/gpt-4o-mini",
+        defaultFastModel = "openai/gpt-4o-mini",
+        defaultProModel = "anthropic/claude-3.5-sonnet",
+        defaultBaseUrl = "https://openrouter.ai/api/v1"
     )
 }
 
@@ -203,4 +243,34 @@ data class MilestoneAuditItem(
     val title: String,
     val status: String, // VERIFIED, IMPLEMENTED, BLOCKED
     val summary: String
+)
+
+enum class BottomToolTab(val label: String) {
+    TERMINAL("Terminal"),
+    PROBLEMS("Problems"),
+    OUTPUT("Output"),
+    BUILD("Build"),
+    LOGCAT("Logcat")
+}
+
+data class IdeLogEntry(
+    val id: String,
+    val timestamp: String,
+    val source: String,
+    val message: String,
+    val isError: Boolean = false
+)
+
+data class FindInFilesMatch(
+    val relativePath: String,
+    val lineNumber: Int,
+    val lineText: String
+)
+
+data class BuildRunState(
+    val isRunning: Boolean = false,
+    val statusLabel: String = "Idle",
+    val progress: Float = 0f,
+    val logs: List<String> = emptyList(),
+    val succeeded: Boolean? = null
 )

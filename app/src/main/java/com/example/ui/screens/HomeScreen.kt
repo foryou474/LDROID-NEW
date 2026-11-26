@@ -61,13 +61,24 @@ import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.LocalLdroidTokens
 import com.example.viewmodel.LdroidUiState
 
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.FilterChip
+import com.example.ui.theme.LdroidThemeId
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun HomeScreen(
     uiState: LdroidUiState,
     activeThemeName: String,
+    activeThemeId: LdroidThemeId = LdroidThemeId.CYBERPUNK_NEON,
+    reducedMotion: Boolean = false,
     onNavigateTab: (PrimaryDestination) -> Unit,
     onOpenLabSection: (DeveloperLabSection) -> Unit,
     onOpenFile: (String) -> Unit,
+    onJumpToFileLine: (String, Int) -> Unit = { _, _ -> },
+    onApplyTheme: (LdroidThemeId) -> Unit = {},
     onImportZipClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -117,14 +128,14 @@ fun HomeScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "LDROID IDE",
+                                text = "M.A.X. STUDIO",
                                 color = tokens.primaryAccent,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = JetBrainsMonoFontFamily
                             )
                             Text(
-                                text = "Android Studio in Your Pocket",
+                                text = "Modular AI eXecutor",
                                 color = tokens.textPrimary,
                                 fontSize = 22.sp,
                                 fontWeight = FontWeight.Bold
@@ -132,12 +143,13 @@ fun HomeScreen(
                         }
                         StatusPill(
                             label = stringResource(R.string.guest_mode_badge),
-                            color = tokens.success
+                            color = tokens.primaryAccent,
+                            pulse = !reducedMotion
                         )
                     }
 
                     Text(
-                        text = "Active Theme: $activeThemeName • Package: com.ldroid.ide",
+                        text = "Theme: $activeThemeName • Workspace: ${uiState.activeProject?.name ?: "MaxStarterApp"}",
                         color = tokens.textMuted,
                         fontSize = 12.sp
                     )
@@ -160,7 +172,12 @@ fun HomeScreen(
                         ) {
                             Icon(Icons.Filled.Code, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.size(6.dp))
-                            Text("Open Editor", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (uiState.activeTabPath != null) "Continue Coding" else "Open Editor",
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
 
                         OutlinedButton(
@@ -175,6 +192,24 @@ fun HomeScreen(
                             Icon(Icons.Filled.FolderOpen, contentDescription = null, tint = tokens.primaryAccent, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.size(6.dp))
                             Text("Import ZIP", color = tokens.textPrimary)
+                        }
+                    }
+
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf(
+                            "Cyberpunk" to LdroidThemeId.CYBERPUNK_NEON,
+                            "Emerald" to LdroidThemeId.EMERALD_MATRIX,
+                            "Purple" to LdroidThemeId.ROYAL_PURPLE,
+                            "Light" to LdroidThemeId.ARCTIC_LIGHT
+                        ).forEach { (label, id) ->
+                            FilterChip(
+                                selected = activeThemeId == id,
+                                onClick = { onApplyTheme(id) },
+                                label = { Text(label, fontSize = 10.sp) }
+                            )
                         }
                     }
                 }
@@ -211,7 +246,18 @@ fun HomeScreen(
                     )
                 }
 
-                Spacer(Modifier.height(12.dp))
+                if (uiState.activeTabPath != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "Editing: ${uiState.activeTabPath}",
+                        color = tokens.primaryAccent,
+                        fontSize = 11.sp,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -236,6 +282,53 @@ fun HomeScreen(
             }
         }
 
+        // Active Diagnostics Jump Cards
+        if (uiState.diagnostics.isNotEmpty()) {
+            item {
+                SectionHeader(
+                    title = "Active Diagnostics (${uiState.diagnostics.size})",
+                    subtitle = "Tap any finding to jump directly to the file and line"
+                )
+            }
+            items(uiState.diagnostics.take(4)) { issue ->
+                val sevColor = when (issue.severity) {
+                    DiagnosticSeverity.ERROR, DiagnosticSeverity.SECRET -> tokens.error
+                    DiagnosticSeverity.WARNING -> tokens.warning
+                    DiagnosticSeverity.INFO -> tokens.info
+                }
+                LdroidSurfaceCard(
+                    onClick = { onJumpToFileLine(issue.filePath, issue.line) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Filled.Warning, contentDescription = issue.severity.name, tint = sevColor, modifier = Modifier.size(18.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "${issue.filePath}:${issue.line}",
+                                color = tokens.primaryAccent,
+                                fontSize = 11.sp,
+                                fontFamily = JetBrainsMonoFontFamily,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = issue.message,
+                                color = tokens.textPrimary,
+                                fontSize = 12.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Jump to line", tint = tokens.textMuted, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
+
         // Quick Launch Actions
         item {
             Row(
@@ -250,7 +343,7 @@ fun HomeScreen(
                 )
                 QuickActionTile(
                     icon = Icons.Filled.AutoAwesome,
-                    label = "AI Studio",
+                    label = "M.A.X. AI",
                     onClick = { onNavigateTab(PrimaryDestination.AI_STUDIO) },
                     modifier = Modifier.weight(1f).fillMaxHeight().testTag("quick_ai_studio")
                 )
@@ -415,7 +508,7 @@ private fun DeveloperLabCard(
         ) {
             Icon(icon, contentDescription = section.title, tint = tokens.primaryAccent, modifier = Modifier.size(20.dp))
             Text(
-                text = section.milestoneOwner,
+                text = section.categoryTag,
                 color = tokens.secondaryAccent,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,

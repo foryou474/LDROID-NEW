@@ -9,8 +9,11 @@ import com.example.data.ai.ByokAiGateway
 import com.example.data.analysis.ApkAnalysisReport
 import com.example.data.analysis.ApkAnalyzer
 import com.example.data.analysis.StaticAnalyzer
+import com.example.data.audit.RoadmapRegistry
+import com.example.data.audit.VerificationReport
 import com.example.data.github.GitHubApiClient
 import com.example.data.github.GitHubRepoStatus
+import com.example.data.local.AiMessageEntity
 import com.example.data.local.FileOpHistoryEntity
 import com.example.data.local.LdroidDatabase
 import com.example.data.local.ProjectEntity
@@ -18,6 +21,8 @@ import com.example.data.local.WorkspaceSnapshotEntity
 import com.example.data.preferences.LdroidPreferences
 import com.example.data.preferences.LdroidSettingsState
 import com.example.data.security.SecureCredentialVault
+import com.example.data.terminal.TerminalCommandHooks
+import com.example.data.terminal.TerminalLine
 import com.example.data.terminal.TerminalSession
 import com.example.data.terminal.TerminalSessionManager
 import com.example.data.terminal.ToolchainProbeReport
@@ -29,12 +34,17 @@ import com.example.data.workspace.ZipImportSummary
 import com.example.model.AiChatMessage
 import com.example.model.AiProposedFileChange
 import com.example.model.AiProviderType
+import com.example.model.BottomToolTab
+import com.example.model.BuildRunState
 import com.example.model.CodePreviewState
 import com.example.model.DeveloperLabSection
 import com.example.model.DeviceProfile
 import com.example.model.DiagnosticIssue
+import com.example.model.DiagnosticSeverity
 import com.example.model.FileChangeSummary
 import com.example.model.FilePreviewKind
+import com.example.model.FindInFilesMatch
+import com.example.model.IdeLogEntry
 import com.example.model.LineEnding
 import com.example.model.OpenEditorTab
 import com.example.model.PrimaryDestination
@@ -43,9 +53,11 @@ import com.example.model.TextEncodingOption
 import com.example.model.VisualComponentType
 import com.example.model.VisualNode
 import com.example.model.WorkspaceFileItem
+import com.example.ui.screens.CodeEditorHelpers
 import com.example.ui.theme.LdroidThemeId
 import com.example.ui.theme.LdroidThemes
 import com.example.ui.theme.LdroidTokens
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -54,16 +66,22 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 
 data class LdroidUiState(
-    val currentTab: PrimaryDestination = PrimaryDestination.HOME,
+    val currentTab: PrimaryDestination = PrimaryDestination.EDITOR,
     val activeLabSection: DeveloperLabSection? = null,
     val previewThemeTokens: LdroidTokens? = null,
     val projects: List<ProjectEntity> = emptyList(),
@@ -83,18 +101,35 @@ data class LdroidUiState(
     val previewLandscape: Boolean = false,
     val previewFontScale: Float = 1.0f,
     val codePreviewState: CodePreviewState = CodePreviewState(),
-    // Terminal & Developer Lab
+    // Terminal, Output, Build & Developer Lab
     val activeTerminalSessionId: String? = null,
     val logcatLines: List<String> = emptyList(),
+    val ideOutputLogs: List<IdeLogEntry> = emptyList(),
+    val buildState: BuildRunState = BuildRunState(),
+    val findInFilesQuery: String = "",
+    val findInFilesResults: List<FindInFilesMatch> = emptyList(),
+    val pendingCursorJump: Pair<String, Int>? = null,
+    val editorFindQuery: String = "",
+    val editorFindMatchCase: Boolean = false,
+    val pendingOffsetJump: Pair<String, IntRange>? = null,
     val toolchainProbe: ToolchainProbeReport? = null,
     val apkReport: ApkAnalysisReport? = null,
     val isApkAnalyzing: Boolean = false,
     // AI Studio
     val aiMessages: List<AiChatMessage> = emptyList(),
     val isAiLoading: Boolean = false,
+    val isTestingAiConnection: Boolean = false,
+    val aiConnectionTestResult: Pair<Boolean, String>? = null,
+    val fetchedModels: List<String> = emptyList(),
+    val isFetchingModels: Boolean = false,
+    val fetchModelsError: String? = null,
     // GitHub
     val gitHubStatus: GitHubRepoStatus? = null,
+    val gitHubError: String? = null,
     val isGitHubLoading: Boolean = false,
+    // System Verification Suite (M01-M50)
+    val verificationReport: VerificationReport? = null,
+    val isRunningVerification: Boolean = false,
     // Feedback banner/snackbar
     val statusMessage: String? = null,
     val lastZipImportSummary: ZipImportSummary? = null
@@ -168,6 +203,20 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
         }
+        viewModelScope.launch {
+            _uiState
+                .map { it.activeProject?.id }
+                .distinctUntilChanged()
+                .flatMapLatest { projectId ->
+                    if (projectId == null) flowOf(emptyList())
+                    else dao.observeAiMessages(projectId)
+                }
+                .collect { entities ->
+                    _uiState.update { state ->
+                        state.copy(aiMessages = entities.map { it.toDomain() })
+                    }
+                }
+        }
     }
 
     private suspend fun onProjectActivated(project: ProjectEntity) {
@@ -178,14 +227,72 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
                 activeTerminalSessionId = termId,
                 openTabs = emptyList(),
                 activeTabPath = null,
-                selectedFilePaths = emptySet()
+                selectedFilePaths = emptySet(),
+                findInFilesResults = emptyList(),
+                buildState = BuildRunState()
             )
         }
+        fileManager.removeDefaultMainActivityIfExists()
         refreshWorkspaceFilesAndAnalysis(project)
-        val initialFile = project.lastOpenedFile
-            ?: _uiState.value.workspaceFiles.firstOrNull { !it.isDirectory }?.relativePath
-        if (initialFile != null) {
-            openFileInEditor(initialFile)
+        appendIdeLog("Workspace", "Activated project '${project.name}' (${project.packageName})")
+
+        // Restore persisted open tabs for this project sequentially to avoid tab/state races
+        val (savedPaths, savedActive) = readPersistedTabs(project.id)
+        val existingFiles = _uiState.value.workspaceFiles.filter { !it.isDirectory }.map { it.relativePath }.toSet()
+        val validSaved = savedPaths.filter { it in existingFiles }
+        val tabsToOpen = validSaved
+
+        if (tabsToOpen.isNotEmpty()) {
+            val loadedTabs = mutableListOf<OpenEditorTab>()
+            for (path in tabsToOpen) {
+                fileManager.openFileTab(project, path).onSuccess { loadedTabs.add(it) }
+            }
+            if (loadedTabs.isNotEmpty()) {
+                val targetActivePath = savedActive?.takeIf { s -> loadedTabs.any { it.relativePath == s } }
+                    ?: loadedTabs.last().relativePath
+                val activeTab = loadedTabs.firstOrNull { it.relativePath == targetActivePath } ?: loadedTabs.last()
+                _uiState.update { state ->
+                    state.copy(
+                        openTabs = loadedTabs,
+                        activeTabPath = activeTab.relativePath
+                    )
+                }
+                if (activeTab.previewMode == FilePreviewKind.ZIP_ARCHIVE) {
+                    fileManager.inspectZipEntries(project, activeTab.relativePath).onSuccess { entries ->
+                        _uiState.update { it.copy(zipInspectionEntries = entries) }
+                    }
+                } else if (activeTab.previewMode == FilePreviewKind.CODE_TEXT) {
+                    updateCodeLivePreview(activeTab.relativePath, activeTab.content)
+                }
+            }
+        }
+    }
+
+    private fun findDefaultEntryFile(project: ProjectEntity, existingFiles: Set<String>): String? {
+        if (existingFiles.isEmpty()) return null
+        return project.lastOpenedFile?.takeIf { it in existingFiles }
+            ?: existingFiles.firstOrNull { it.endsWith("/MainActivity.kt") || it == "MainActivity.kt" }
+            ?: existingFiles.firstOrNull { it.endsWith("/MainActivity.java") || it == "MainActivity.java" }
+            ?: existingFiles.firstOrNull { it == "lib/main.dart" || it.endsWith("/main.dart") }
+            ?: existingFiles.firstOrNull { it == "App.tsx" || it == "App.jsx" || it == "App.js" }
+            ?: existingFiles.firstOrNull { it == "index.html" }
+            ?: existingFiles.firstOrNull {
+                val lower = it.lowercase()
+                lower.endsWith(".kt") || lower.endsWith(".java") || lower.endsWith(".dart") ||
+                    lower.endsWith(".tsx") || lower.endsWith(".html")
+            }
+            ?: existingFiles.firstOrNull()
+    }
+
+    fun ensureDefaultFileOpen() {
+        val state = _uiState.value
+        if (state.activeTab != null) return
+        if (state.openTabs.isNotEmpty()) {
+            val first = state.openTabs.first()
+            _uiState.update { it.copy(activeTabPath = first.relativePath) }
+            if (first.previewMode == FilePreviewKind.CODE_TEXT) {
+                updateCodeLivePreview(first.relativePath, first.content)
+            }
         }
     }
 
@@ -305,6 +412,55 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun restoreSnapshotFile(relativePath: String) {
+        val project = _uiState.value.activeProject ?: return
+        viewModelScope.launch {
+            fileManager.restoreFromBaseline(project, relativePath)
+                .onSuccess {
+                    val isOpen = _uiState.value.openTabs.any { it.relativePath == relativePath }
+                    if (isOpen) {
+                        fileManager.openFileTab(project, relativePath).onSuccess { reloaded ->
+                            _uiState.update { st ->
+                                st.copy(openTabs = st.openTabs.map { if (it.relativePath == relativePath) reloaded else it })
+                            }
+                            updateCodeLivePreview(reloaded.relativePath, reloaded.content)
+                        }.onFailure {
+                            closeEditorTab(relativePath)
+                        }
+                    }
+                    refreshWorkspaceFilesAndAnalysis(project)
+                    appendIdeLog("Snapshot", "Restored $relativePath to baseline")
+                    postMessage("Restored $relativePath from snapshot")
+                }
+                .onFailure { postMessage("Restore failed: ${it.message}") }
+        }
+    }
+
+    fun restoreFullSnapshot() {
+        val project = _uiState.value.activeProject ?: return
+        viewModelScope.launch {
+            fileManager.restoreFromBaseline(project, null)
+                .onSuccess { count ->
+                    // Reload currently open tabs that still exist
+                    val openPaths = _uiState.value.openTabs.map { it.relativePath }
+                    val reloadedTabs = mutableListOf<OpenEditorTab>()
+                    for (path in openPaths) {
+                        fileManager.openFileTab(project, path).onSuccess { reloadedTabs.add(it) }
+                    }
+                    val nextActive = _uiState.value.activeTabPath?.takeIf { p -> reloadedTabs.any { it.relativePath == p } }
+                        ?: reloadedTabs.firstOrNull()?.relativePath
+                    _uiState.update { st ->
+                        st.copy(openTabs = reloadedTabs, activeTabPath = nextActive)
+                    }
+                    persistCurrentTabs()
+                    refreshWorkspaceFilesAndAnalysis(project)
+                    appendIdeLog("Snapshot", "Restored workspace baseline ($count files)")
+                    postMessage("Restored $count files from baseline snapshot")
+                }
+                .onFailure { postMessage("Workspace rollback failed: ${it.message}") }
+        }
+    }
+
     // --- File Explorer & Code Editor (M05 / M06) ---
 
     fun updateFileSearch(query: String) {
@@ -328,10 +484,10 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(selectedFilePaths = emptySet()) }
     }
 
-    fun createFileOrFolder(relativePath: String, isDirectory: Boolean) {
+    fun createFileOrFolder(relativePath: String, isDirectory: Boolean, initialContent: String = "") {
         val project = _uiState.value.activeProject ?: return
         viewModelScope.launch {
-            fileManager.createFileOrFolder(project, relativePath, isDirectory)
+            fileManager.createFileOrFolder(project, relativePath, isDirectory, initialContent)
                 .onSuccess {
                     refreshWorkspaceFilesAndAnalysis(project)
                     if (!isDirectory) openFileInEditor(relativePath)
@@ -372,6 +528,46 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun moveFile(srcRel: String, destRel: String) {
+        val project = _uiState.value.activeProject ?: return
+        viewModelScope.launch {
+            fileManager.moveFile(project, srcRel, destRel)
+                .onSuccess { newRel ->
+                    _uiState.update { state ->
+                        val updatedTabs = state.openTabs.map { tab ->
+                            when {
+                                tab.relativePath == srcRel -> tab.copy(relativePath = newRel)
+                                tab.relativePath.startsWith("$srcRel/") ->
+                                    tab.copy(relativePath = newRel + tab.relativePath.removePrefix(srcRel))
+                                else -> tab
+                            }
+                        }
+                        val nextActive = when {
+                            state.activeTabPath == srcRel -> newRel
+                            state.activeTabPath?.startsWith("$srcRel/") == true ->
+                                newRel + state.activeTabPath.removePrefix(srcRel)
+                            else -> state.activeTabPath
+                        }
+                        state.copy(openTabs = updatedTabs, activeTabPath = nextActive)
+                    }
+                    persistCurrentTabs()
+                    refreshWorkspaceFilesAndAnalysis(project)
+                    appendIdeLog("Files", "Moved $srcRel -> $newRel")
+                    postMessage("Moved to $newRel")
+                }
+                .onFailure { postMessage("Move failed: ${it.message}") }
+        }
+    }
+
+    fun refreshWorkspace() {
+        val project = _uiState.value.activeProject ?: return
+        viewModelScope.launch {
+            refreshWorkspaceFilesAndAnalysis(project)
+            appendIdeLog("Workspace", "Refreshed workspace file tree (${_uiState.value.workspaceFiles.size} entries)")
+            postMessage("Workspace refreshed")
+        }
+    }
+
     fun deleteSelectedFiles(paths: List<String>) {
         val project = _uiState.value.activeProject ?: return
         viewModelScope.launch {
@@ -388,14 +584,20 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
                             selectedFilePaths = emptySet()
                         )
                     }
+                    persistCurrentTabs()
                     refreshWorkspaceFilesAndAnalysis(project)
+                    appendIdeLog("Files", "Deleted $count item(s): ${paths.joinToString()}")
                     postMessage("Deleted $count item(s)")
                 }
                 .onFailure { postMessage("Delete failed: ${it.message}") }
         }
     }
 
-    fun openFileInEditor(relativePath: String, jumpToEditorTab: Boolean = false) {
+    fun openFileInEditor(
+        relativePath: String,
+        jumpToEditorTab: Boolean = false,
+        persistTabs: Boolean = true
+    ) {
         val project = _uiState.value.activeProject ?: return
         val alreadyOpen = _uiState.value.openTabs.firstOrNull { it.relativePath == relativePath }
         if (alreadyOpen != null) {
@@ -406,6 +608,7 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
             updateCodeLivePreview(alreadyOpen.relativePath, alreadyOpen.content)
+            if (persistTabs) persistCurrentTabs()
             return
         }
 
@@ -426,6 +629,8 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
                     } else if (tab.previewMode == FilePreviewKind.CODE_TEXT) {
                         updateCodeLivePreview(tab.relativePath, tab.content)
                     }
+                    if (persistTabs) persistCurrentTabs()
+                    appendIdeLog("Editor", "Opened ${tab.relativePath}")
                 }
                 .onFailure { postMessage("Open failed: ${it.message}") }
         }
@@ -439,6 +644,30 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
             } else state.activeTabPath
             state.copy(openTabs = filtered, activeTabPath = nextActive)
         }
+        persistCurrentTabs()
+    }
+
+    fun closeOtherTabs(keepPath: String) {
+        _uiState.update { state ->
+            val kept = state.openTabs.filter { it.relativePath == keepPath }
+            state.copy(openTabs = kept, activeTabPath = kept.firstOrNull()?.relativePath)
+        }
+        persistCurrentTabs()
+    }
+
+    fun closeAllTabs() {
+        _uiState.update { it.copy(openTabs = emptyList(), activeTabPath = null) }
+        persistCurrentTabs()
+    }
+
+    fun jumpToFileLine(relativePath: String, line: Int) {
+        val targetLine = line.coerceAtLeast(1)
+        _uiState.update { it.copy(pendingCursorJump = relativePath to targetLine) }
+        openFileInEditor(relativePath, jumpToEditorTab = true)
+    }
+
+    fun consumeCursorJump() {
+        _uiState.update { it.copy(pendingCursorJump = null) }
     }
 
     fun updateActiveTabContent(newContent: String) {
@@ -462,12 +691,18 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun onTabContentMutated(tab: OpenEditorTab) {
+    private fun onTabContentMutated(tab: OpenEditorTab, fromVisualBuilder: Boolean = false) {
         updateCodeLivePreview(tab.relativePath, tab.content)
         val fileIssues = StaticAnalyzer.analyzeFile(tab.relativePath, tab.content)
         _uiState.update { state ->
             val others = state.diagnostics.filterNot { it.filePath == tab.relativePath }
             state.copy(diagnostics = fileIssues + others)
+        }
+        if (!fromVisualBuilder && tab.relativePath.endsWith("VisualGeneratedScreen.kt")) {
+            val parsed = StaticAnalyzer.parseCodeForLivePreview(tab.relativePath, tab.content)
+            if (parsed.isSuccess && parsed.nodes.isNotEmpty()) {
+                _uiState.update { it.copy(visualNodes = parsed.nodes) }
+            }
         }
         if (settings.value.autoSaveEnabled && !tab.isLargeFilePreview) {
             scheduleAutoSave(tab.relativePath)
@@ -481,7 +716,7 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
             val project = _uiState.value.activeProject ?: return@launch
             val currentTab = _uiState.value.openTabs.firstOrNull { it.relativePath == relativePath } ?: return@launch
             if (!currentTab.isDirty || currentTab.isLargeFilePreview) return@launch
-            fileManager.saveFileTab(project, currentTab).onSuccess { saved ->
+            fileManager.saveFileTab(project, currentTab, formatOnSave = settings.value.formatOnSave).onSuccess { saved ->
                 _uiState.update { state ->
                     state.copy(
                         openTabs = state.openTabs.map {
@@ -548,7 +783,7 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
         val project = _uiState.value.activeProject ?: return
         val tab = _uiState.value.activeTab ?: return
         viewModelScope.launch {
-            fileManager.saveFileTab(project, tab)
+            fileManager.saveFileTab(project, tab, formatOnSave = settings.value.formatOnSave)
                 .onSuccess { saved ->
                     _uiState.update { state ->
                         state.copy(
@@ -558,9 +793,156 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
                         )
                     }
                     refreshWorkspaceFilesAndAnalysis(project)
+                    appendIdeLog("Save", "Saved ${saved.relativePath}")
                     postMessage("Saved ${saved.relativePath}")
                 }
-                .onFailure { postMessage("Save failed: ${it.message}") }
+                .onFailure {
+                    appendIdeLog("Save", "Failed saving ${tab.relativePath}: ${it.message}", isError = true)
+                    postMessage("Save failed: ${it.message}")
+                }
+        }
+    }
+
+    fun saveAllTabs() {
+        val project = _uiState.value.activeProject ?: return
+        val dirtyTabs = _uiState.value.openTabs.filter { it.isDirty && !it.isLargeFilePreview }
+        if (dirtyTabs.isEmpty()) {
+            postMessage("All open files are already saved")
+            return
+        }
+        val shouldFormat = settings.value.formatOnSave
+        viewModelScope.launch {
+            var savedCount = 0
+            val savedMap = mutableMapOf<String, OpenEditorTab>()
+            for (tab in dirtyTabs) {
+                fileManager.saveFileTab(project, tab, formatOnSave = shouldFormat).onSuccess { saved ->
+                    savedMap[saved.relativePath] = saved
+                    savedCount++
+                }
+            }
+            _uiState.update { state ->
+                state.copy(
+                    openTabs = state.openTabs.map { savedMap[it.relativePath] ?: it }
+                )
+            }
+            refreshWorkspaceFilesAndAnalysis(project)
+            appendIdeLog("Save All", "Saved $savedCount modified file(s)")
+            postMessage("Saved $savedCount file(s)")
+        }
+    }
+
+    fun saveAndCloseTabs(
+        targetPaths: List<String>,
+        closeOthersKeeping: String? = null,
+        closeAll: Boolean = false
+    ) {
+        val project = _uiState.value.activeProject ?: return
+        val dirtyTargets = _uiState.value.openTabs.filter {
+            it.relativePath in targetPaths && it.isDirty && !it.isLargeFilePreview
+        }
+        val shouldFormat = settings.value.formatOnSave
+        viewModelScope.launch {
+            for (tab in dirtyTargets) {
+                fileManager.saveFileTab(project, tab, formatOnSave = shouldFormat)
+            }
+            when {
+                closeAll -> closeAllTabs()
+                closeOthersKeeping != null -> closeOtherTabs(closeOthersKeeping)
+                else -> targetPaths.forEach { closeEditorTab(it) }
+            }
+            refreshWorkspaceFilesAndAnalysis(project)
+            if (dirtyTargets.isNotEmpty()) {
+                appendIdeLog("Save", "Saved ${dirtyTargets.size} file(s) before closing")
+            }
+        }
+    }
+
+    fun searchWorkspaceFiles(query: String, ignoreCase: Boolean = true) {
+        val project = _uiState.value.activeProject ?: return
+        _uiState.update { it.copy(findInFilesQuery = query) }
+        viewModelScope.launch {
+            val matches = fileManager.searchInFiles(project, query, ignoreCase)
+            _uiState.update { it.copy(findInFilesResults = matches) }
+            if (query.isNotBlank()) {
+                appendIdeLog("Find in Files", "Query '$query': ${matches.size} match(es)")
+            }
+        }
+    }
+
+    fun replaceAcrossWorkspace(find: String, replace: String, ignoreCase: Boolean = true) {
+        val project = _uiState.value.activeProject ?: return
+        viewModelScope.launch {
+            fileManager.replaceInFiles(project, find, replace, ignoreCase)
+                .onSuccess { (occurrences, changedFiles) ->
+                    if (occurrences > 0) {
+                        for (rel in changedFiles) {
+                            val isOpen = _uiState.value.openTabs.any { it.relativePath == rel }
+                            if (isOpen) {
+                                fileManager.openFileTab(project, rel).onSuccess { reloaded ->
+                                    _uiState.update { state ->
+                                        state.copy(
+                                            openTabs = state.openTabs.map {
+                                                if (it.relativePath == rel) reloaded else it
+                                            }
+                                        )
+                                    }
+                                    updateCodeLivePreview(reloaded.relativePath, reloaded.content)
+                                }
+                            }
+                        }
+                        refreshWorkspaceFilesAndAnalysis(project)
+                        searchWorkspaceFiles(find, ignoreCase)
+                        appendIdeLog("Replace in Files", "Replaced $occurrences occurrence(s) across ${changedFiles.size} file(s)")
+                        postMessage("Replaced $occurrences occurrence(s) in ${changedFiles.size} file(s)")
+                    } else {
+                        postMessage("No matches found across workspace")
+                    }
+                }
+                .onFailure { postMessage("Replace failed: ${it.message}") }
+        }
+    }
+
+    fun setEditorSearchState(query: String, matchCase: Boolean) {
+        _uiState.update { it.copy(editorFindQuery = query, editorFindMatchCase = matchCase) }
+    }
+
+    fun findNextInActiveTab(currentCursorOffset: Int) {
+        val tab = _uiState.value.activeTab ?: return
+        val query = _uiState.value.editorFindQuery
+        if (query.isEmpty()) {
+            postMessage("Enter search text first")
+            return
+        }
+        val nextRange = CodeEditorHelpers.findNextOccurrenceOffset(
+            text = tab.content,
+            query = query,
+            currentOffset = currentCursorOffset,
+            ignoreCase = !_uiState.value.editorFindMatchCase
+        )
+        if (nextRange == null) {
+            postMessage("No matches found for '$query'")
+        } else {
+            _uiState.update { it.copy(pendingOffsetJump = tab.relativePath to nextRange) }
+        }
+    }
+
+    fun clearPendingOffsetJump() {
+        _uiState.update { it.copy(pendingOffsetJump = null) }
+    }
+
+    fun formatActiveTab() {
+        val tab = _uiState.value.activeTab ?: return
+        if (tab.isLargeFilePreview || tab.previewMode != FilePreviewKind.CODE_TEXT) {
+            postMessage("Cannot format binary or large read-only preview file")
+            return
+        }
+        val ext = tab.relativePath.substringAfterLast('.', "")
+        val formatted = CodeEditorHelpers.formatCode(tab.content, ext, settings.value.tabWidth)
+        if (formatted != tab.content) {
+            updateActiveTabContent(formatted)
+            postMessage("Formatted ${tab.relativePath.substringAfterLast('/')}")
+        } else {
+            postMessage("File is already formatted")
         }
     }
 
@@ -608,7 +990,14 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // --- Visual Builder (M08 / M15) ---
+    fun refreshActiveCodePreview() {
+        val active = _uiState.value.activeTab ?: return
+        if (active.previewMode == FilePreviewKind.CODE_TEXT) {
+            updateCodeLivePreview(active.relativePath, active.content)
+        }
+    }
+
+    // --- Visual Builder ---
 
     fun addVisualNode(type: VisualComponentType) {
         val node = VisualNode(
@@ -618,14 +1007,22 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
                 VisualComponentType.TEXT -> "Heading Label"
                 VisualComponentType.BUTTON -> "Primary Action"
                 VisualComponentType.CARD -> "Feature Card"
+                VisualComponentType.COUNTER -> "Active Counter"
                 VisualComponentType.TEXT_FIELD -> "Input Field"
                 VisualComponentType.SWITCH_CONTROL -> "Toggle Setting"
                 else -> type.displayName
             },
-            secondaryText = if (type == VisualComponentType.CARD) "Generated in Visual Builder" else "",
-            useAccent = type == VisualComponentType.BUTTON
+            secondaryText = when (type) {
+                VisualComponentType.CARD -> "Generated in M.A.X. Studio"
+                VisualComponentType.COUNTER -> "Tap + or - to update state"
+                else -> ""
+            },
+            paddingDp = 12,
+            useAccent = type == VisualComponentType.BUTTON || type == VisualComponentType.COUNTER,
+            colorTag = if (type == VisualComponentType.BUTTON || type == VisualComponentType.COUNTER) "Cyan" else "Default"
         )
         _uiState.update { it.copy(visualNodes = it.visualNodes + node) }
+        syncVisualBuilderToCodeTab()
     }
 
     fun updateVisualNodeLabel(id: String, newLabel: String) {
@@ -634,12 +1031,94 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
                 visualNodes = state.visualNodes.map { if (it.id == id) it.copy(label = newLabel) else it }
             )
         }
+        syncVisualBuilderToCodeTab()
+    }
+
+    fun updateVisualNode(
+        id: String,
+        label: String? = null,
+        secondaryText: String? = null,
+        paddingDp: Int? = null,
+        colorTag: String? = null
+    ) {
+        _uiState.update { state ->
+            state.copy(
+                visualNodes = state.visualNodes.map { node ->
+                    if (node.id == id) {
+                        node.copy(
+                            label = label ?: node.label,
+                            secondaryText = secondaryText ?: node.secondaryText,
+                            paddingDp = paddingDp?.coerceIn(0, 48) ?: node.paddingDp,
+                            colorTag = colorTag ?: node.colorTag
+                        )
+                    } else node
+                }
+            )
+        }
+        syncVisualBuilderToCodeTab()
+    }
+
+    fun moveVisualNode(id: String, direction: Int) {
+        _uiState.update { state ->
+            val list = state.visualNodes.toMutableList()
+            val idx = list.indexOfFirst { it.id == id }
+            if (idx < 0) return@update state
+            val targetIdx = (idx + direction).coerceIn(0, list.lastIndex)
+            if (targetIdx == idx) return@update state
+            val item = list.removeAt(idx)
+            list.add(targetIdx, item)
+            state.copy(visualNodes = list)
+        }
+        syncVisualBuilderToCodeTab()
     }
 
     fun removeVisualNode(id: String) {
         _uiState.update { state ->
             state.copy(visualNodes = state.visualNodes.filterNot { it.id == id })
         }
+        syncVisualBuilderToCodeTab()
+    }
+
+    private fun syncVisualBuilderToCodeTab() {
+        val project = _uiState.value.activeProject ?: return
+        val nodes = _uiState.value.visualNodes
+        val pkgPath = project.packageName.replace('.', '/')
+        val targetPath = "app/src/main/java/$pkgPath/VisualGeneratedScreen.kt"
+        val generatedCode = VisualBuilderCodegen.generateComposeKotlin(project.packageName, "VisualGeneratedScreen", nodes)
+
+        var syncedTab: OpenEditorTab? = null
+        _uiState.update { state ->
+            val existing = state.openTabs.firstOrNull { it.relativePath == targetPath }
+            val nextTab = if (existing != null) {
+                if (existing.content == generatedCode) {
+                    existing
+                } else {
+                    existing.copy(
+                        content = generatedCode,
+                        undoStack = (existing.undoStack + existing.content).takeLast(40),
+                        redoStack = emptyList()
+                    )
+                }
+            } else {
+                val diskFile = runCatching { fileManager.resolveSafe(project, targetPath) }.getOrNull()
+                val saved = if (diskFile != null && diskFile.exists()) {
+                    runCatching { diskFile.readText(Charsets.UTF_8) }.getOrDefault("")
+                } else ""
+                OpenEditorTab(
+                    relativePath = targetPath,
+                    content = generatedCode,
+                    savedContent = saved
+                )
+            }
+            syncedTab = nextTab
+            val nextTabs = if (existing != null) {
+                state.openTabs.map { if (it.relativePath == targetPath) nextTab else it }
+            } else {
+                state.openTabs + nextTab
+            }
+            state.copy(openTabs = nextTabs, activeTabPath = targetPath)
+        }
+        syncedTab?.let { onTabContentMutated(it, fromVisualBuilder = true) }
     }
 
     fun writeVisualBuilderToProject(asXml: Boolean) {
@@ -660,6 +1139,13 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
             val file = fileManager.resolveSafe(project, targetPath)
             file.parentFile?.mkdirs()
             file.writeText(code, Charsets.UTF_8)
+            _uiState.update { state ->
+                state.copy(
+                    openTabs = state.openTabs.map { tab ->
+                        if (tab.relativePath == targetPath) tab.copy(content = code, savedContent = code) else tab
+                    }
+                )
+            }
             refreshWorkspaceFilesAndAnalysis(project)
             openFileInEditor(targetPath)
             postMessage("Generated $targetPath from Visual Builder")
@@ -681,11 +1167,123 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
     // --- Terminal & Developer Lab (M11 / M12 / M16 / M17 / M24) ---
 
     fun runTerminalCommand(command: String) {
+        val project = _uiState.value.activeProject
         val sessionId = _uiState.value.activeTerminalSessionId
-            ?: terminalManager.ensureDefaultSession(_uiState.value.activeProject?.rootPath ?: getApplication<Application>().filesDir.absolutePath)
+            ?: terminalManager.ensureDefaultSession(project?.rootPath ?: getApplication<Application>().filesDir.absolutePath)
         _uiState.update { it.copy(activeTerminalSessionId = sessionId) }
+
+        val hooks = TerminalCommandHooks(
+            onWorkspaceChanged = {
+                project?.let { refreshWorkspaceFilesAndAnalysis(it) }
+            },
+            onGitStatus = {
+                buildGitStatusLines(project)
+            },
+            onGitDiff = {
+                buildGitDiffLines(project)
+            },
+            onGradleBuild = { task ->
+                runTerminalGradleLint(project, task)
+            }
+        )
+
         viewModelScope.launch {
-            terminalManager.runCommand(sessionId, command)
+            terminalManager.runCommand(sessionId, command, hooks)
+        }
+    }
+
+    private suspend fun buildGitStatusLines(project: ProjectEntity?): List<TerminalLine> {
+        if (project == null) return listOf(TerminalLine(text = "No active workspace.", isError = true))
+        val diskChanges = fileManager.computeWorkspaceChanges(project)
+        val dirtyTabs = _uiState.value.openTabs.filter { it.isDirty }
+        val lines = mutableListOf(
+            TerminalLine(text = "On branch ${settings.value.defaultGitBranch}", isPrompt = true)
+        )
+        if (diskChanges.isEmpty() && dirtyTabs.isEmpty()) {
+            lines.add(TerminalLine(text = "nothing to commit, working tree clean"))
+        } else {
+            diskChanges.forEach { ch ->
+                val prefix = when (ch.status) {
+                    "ADDED" -> "new file:"
+                    "DELETED" -> "deleted:"
+                    else -> "modified:"
+                }
+                lines.add(TerminalLine(text = "  $prefix   ${ch.relativePath}", isError = ch.status == "DELETED"))
+            }
+            dirtyTabs.forEach { tab ->
+                if (diskChanges.none { it.relativePath == tab.relativePath }) {
+                    lines.add(TerminalLine(text = "  unsaved:    ${tab.relativePath} (editor buffer)"))
+                }
+            }
+        }
+        return lines
+    }
+
+    private suspend fun buildGitDiffLines(project: ProjectEntity?): List<TerminalLine> {
+        if (project == null) return listOf(TerminalLine(text = "No active workspace.", isError = true))
+        val changes = fileManager.computeWorkspaceChanges(project)
+        if (changes.isEmpty()) {
+            return listOf(TerminalLine(text = "No modified files against baseline snapshot."))
+        }
+        val out = mutableListOf<TerminalLine>()
+        changes.take(6).forEach { ch ->
+            out.add(TerminalLine(text = "--- a/${ch.relativePath}", isPrompt = true))
+            out.add(TerminalLine(text = "+++ b/${ch.relativePath}", isPrompt = true))
+            ch.diffLines.filter { it.marker != ' ' }.take(24).forEach { dl ->
+                out.add(TerminalLine(text = "${dl.marker} ${dl.text}", isError = dl.marker == '-'))
+            }
+        }
+        return out
+    }
+
+    private suspend fun runTerminalGradleLint(project: ProjectEntity?, task: String): Pair<Int, List<TerminalLine>> {
+        if (project == null) return 1 to listOf(TerminalLine(text = "No active project workspace.", isError = true))
+        val root = File(project.rootPath)
+        val diskIssues = StaticAnalyzer.analyzeWorkspace(root)
+        // Also analyze unsaved open editor buffers so live editor errors immediately surface in Problems
+        val openBuffers = _uiState.value.openTabs
+        val bufferPaths = openBuffers.map { it.relativePath }.toSet()
+        val bufferIssues = openBuffers.flatMap { StaticAnalyzer.analyzeFile(it.relativePath, it.content) }
+        val combinedIssues = bufferIssues + diskIssues.filterNot { it.filePath in bufferPaths }
+
+        _uiState.update { state ->
+            state.copy(
+                diagnostics = combinedIssues,
+                buildState = state.buildState.copy(
+                    isRunning = false,
+                    progress = 1f,
+                    succeeded = combinedIssues.none { it.severity == DiagnosticSeverity.ERROR || it.severity == DiagnosticSeverity.SECRET },
+                    statusLabel = if (combinedIssues.none { it.severity == DiagnosticSeverity.ERROR || it.severity == DiagnosticSeverity.SECRET }) {
+                        "Gradle Lint Passed"
+                    } else {
+                        "Gradle Lint Failed"
+                    }
+                )
+            )
+        }
+
+        val errIssues = combinedIssues.filter { it.severity == DiagnosticSeverity.ERROR || it.severity == DiagnosticSeverity.SECRET }
+        val warnIssues = combinedIssues.filter { it.severity == DiagnosticSeverity.WARNING }
+        val lines = mutableListOf(
+            TerminalLine(text = "> Task :app:$task (M.A.X. Syntax & Lint Verifier)"),
+            TerminalLine(text = "Scanned ${bufferPaths.size} open buffer(s) + workspace files...")
+        )
+        combinedIssues.take(20).forEach { iss ->
+            lines.add(
+                TerminalLine(
+                    text = "  [${iss.severity.name}] ${iss.filePath}:${iss.line} — ${iss.message}",
+                    isError = iss.severity == DiagnosticSeverity.ERROR || iss.severity == DiagnosticSeverity.SECRET
+                )
+            )
+        }
+        if (errIssues.isEmpty()) {
+            lines.add(TerminalLine(text = "BUILD SUCCESSFUL (${warnIssues.size} warning(s) — Problems tab updated)", isPrompt = true))
+            appendIdeLog("Gradle", "gradle $task passed (${warnIssues.size} warnings)")
+            return 0 to lines
+        } else {
+            lines.add(TerminalLine(text = "BUILD FAILED with ${errIssues.size} error(s). Inspect Problems tab.", isError = true))
+            appendIdeLog("Gradle", "gradle $task failed with ${errIssues.size} error(s)", isError = true)
+            return 1 to lines
         }
     }
 
@@ -698,6 +1296,142 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
         val workDir = _uiState.value.activeProject?.rootPath ?: getApplication<Application>().filesDir.absolutePath
         val id = terminalManager.createSession(workDir)
         _uiState.update { it.copy(activeTerminalSessionId = id) }
+    }
+
+    fun clearTerminalSession(id: String) {
+        terminalManager.clearSession(id)
+    }
+
+    fun closeTerminalSession(id: String) {
+        val current = terminalManager.sessions.value
+        if (current.size <= 1) return
+        terminalManager.closeSession(id)
+        val remaining = terminalManager.sessions.value
+        if (_uiState.value.activeTerminalSessionId == id) {
+            _uiState.update { it.copy(activeTerminalSessionId = remaining.firstOrNull()?.id) }
+        }
+    }
+
+    fun updateBottomPanelState(isOpen: Boolean, tab: BottomToolTab, heightDp: Int) {
+        viewModelScope.launch {
+            preferences.updateBottomPanelState(isOpen, tab.name, heightDp)
+        }
+    }
+
+    fun setEditorWorkspaceMode(modeName: String) {
+        if (modeName == "LIVE_PREVIEW") {
+            ensureDefaultFileOpen()
+            refreshActiveCodePreview()
+        } else if (modeName == "VISUAL_BUILDER") {
+            val active = _uiState.value.activeTab
+            if (active != null && active.relativePath.endsWith(".kt")) {
+                val parsed = StaticAnalyzer.parseCodeForLivePreview(active.relativePath, active.content)
+                if (parsed.isSuccess && parsed.nodes.isNotEmpty() && active.relativePath.endsWith("VisualGeneratedScreen.kt")) {
+                    _uiState.update { it.copy(visualNodes = parsed.nodes) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            preferences.setEditorWorkspaceMode(modeName)
+        }
+    }
+
+    fun runWorkspaceBuildCheck() {
+        val project = _uiState.value.activeProject ?: return
+        if (_uiState.value.buildState.isRunning) return
+        viewModelScope.launch {
+            val probe = _uiState.value.toolchainProbe ?: terminalManager.probeToolchainAndDevice()
+            _uiState.update {
+                it.copy(
+                    toolchainProbe = probe,
+                    buildState = BuildRunState(
+                        isRunning = true,
+                        statusLabel = "Running",
+                        progress = 0.15f,
+                        logs = listOf("[Build] Target workspace: ${project.name} (${project.rootPath})")
+                    )
+                )
+            }
+            appendIdeLog("Build", "Started build/verification for ${project.name}")
+
+            if (probe.gradleBinaryFound) {
+                val logs = mutableListOf("[Build] Host Gradle binary detected — invoking `gradle assembleDebug`...")
+                val exitCode = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val proc = ProcessBuilder("gradle", "assembleDebug")
+                            .directory(File(project.rootPath))
+                            .redirectErrorStream(true)
+                            .start()
+                        proc.inputStream.bufferedReader().useLines { seq ->
+                            seq.forEach { line ->
+                                logs.add(line)
+                                _uiState.update { st ->
+                                    st.copy(buildState = st.buildState.copy(progress = 0.65f, logs = logs.takeLast(120)))
+                                }
+                            }
+                        }
+                        proc.waitFor()
+                    }.getOrElse {
+                        logs.add("Gradle execution error: ${it.message}")
+                        -1
+                    }
+                }
+                val ok = exitCode == 0
+                _uiState.update {
+                    it.copy(
+                        buildState = BuildRunState(
+                            isRunning = false,
+                            statusLabel = if (ok) "Gradle Succeeded" else "Gradle Failed (exit $exitCode)",
+                            progress = 1f,
+                            logs = logs,
+                            succeeded = ok
+                        )
+                    )
+                }
+                appendIdeLog("Build", if (ok) "Gradle assembleDebug succeeded" else "Gradle failed (exit $exitCode)", isError = !ok)
+            } else {
+                // Honest on-device pre-flight verification (no fake APK compilation!)
+                val logs = mutableListOf(
+                    "[Stage 1/3] Checking workspace files & Gradle configuration...",
+                )
+                refreshWorkspaceFilesAndAnalysis(project)
+                val files = _uiState.value.workspaceFiles
+                val hasGradle = files.any { it.name == "build.gradle.kts" || it.name == "build.gradle" }
+                val hasManifest = files.any { it.name == "AndroidManifest.xml" }
+                val hasCi = files.any { it.relativePath.contains(".github/workflows") }
+                logs.add("  • Workspace files scanned: ${files.count { !it.isDirectory }}")
+                logs.add("  • Gradle build scripts present: $hasGradle")
+                logs.add("  • AndroidManifest.xml present: $hasManifest")
+                logs.add("  • GitHub Actions CI workflow present: $hasCi")
+                _uiState.update { it.copy(buildState = it.buildState.copy(progress = 0.6f, logs = logs.toList())) }
+
+                val issues = _uiState.value.diagnostics
+                val errCount = issues.count { it.severity == DiagnosticSeverity.ERROR || it.severity == DiagnosticSeverity.SECRET }
+                val warnCount = issues.count { it.severity == DiagnosticSeverity.WARNING }
+                logs.add("[Stage 2/3] Static syntax, XML/JSON & secret audit...")
+                logs.add("  • Errors/Secrets: $errCount • Warnings: $warnCount")
+                issues.take(12).forEach { iss ->
+                    logs.add("  [${iss.severity.name}] ${iss.filePath}:${iss.line} — ${iss.message}")
+                }
+                logs.add("[Stage 3/3] Native JDK/Gradle toolchain check...")
+                logs.add("  • Host `gradle`/`javac` is NOT bundled inside the Android app sandbox.")
+                logs.add("  • Pre-flight checks ${if (errCount == 0) "passed" else "found $errCount blocker(s)"}; full APK compilation requires GitHub Actions CI or a host JDK.")
+
+                val passed = errCount == 0
+                _uiState.update {
+                    it.copy(
+                        buildState = BuildRunState(
+                            isRunning = false,
+                            statusLabel = if (passed) "Pre-Flight Passed (No Host JDK)" else "Pre-Flight Failed ($errCount error)",
+                            progress = 1f,
+                            logs = logs,
+                            succeeded = passed
+                        )
+                    )
+                }
+                appendIdeLog("Build", "Pre-flight verification finished: $errCount error(s), $warnCount warning(s)", isError = !passed)
+            }
+        }
     }
 
     fun selectTerminalSession(id: String) {
@@ -744,7 +1478,79 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
 
     // --- AI Studio (BYOK M09 / M10) ---
 
-    fun sendAiPrompt(prompt: String, attachActiveFile: Boolean) {
+    fun testAiConnection(provider: AiProviderType, apiKeyInput: String, model: String, baseUrl: String) {
+        val resolvedKey = apiKeyInput.trim().ifBlank {
+            vault.readSecret(vault.slotForAiProvider(provider)).orEmpty()
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTestingAiConnection = true, aiConnectionTestResult = null) }
+            aiGateway.testConnection(provider, resolvedKey, model, baseUrl)
+                .onSuccess { msg ->
+                    _uiState.update { it.copy(isTestingAiConnection = false, aiConnectionTestResult = true to msg) }
+                }
+                .onFailure { err ->
+                    _uiState.update {
+                        it.copy(
+                            isTestingAiConnection = false,
+                            aiConnectionTestResult = false to (err.message ?: "Connection failed")
+                        )
+                    }
+                }
+        }
+    }
+
+    fun clearAiConnectionTestResult() {
+        _uiState.update { it.copy(aiConnectionTestResult = null) }
+    }
+
+    fun clearFetchedModels() {
+        _uiState.update { it.copy(fetchedModels = emptyList(), fetchModelsError = null) }
+    }
+
+    fun fetchAiModels(provider: AiProviderType, apiKeyInput: String, baseUrl: String) {
+        val resolvedKey = apiKeyInput.trim().ifBlank {
+            vault.readSecret(vault.slotForAiProvider(provider)).orEmpty()
+        }
+        if (resolvedKey.isBlank()) {
+            _uiState.update {
+                it.copy(
+                    isFetchingModels = false,
+                    fetchModelsError = "Enter or save an API key for ${provider.displayName} to fetch models."
+                )
+            }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isFetchingModels = true, fetchModelsError = null) }
+            aiGateway.fetchAvailableModels(provider, resolvedKey, baseUrl)
+                .onSuccess { models ->
+                    _uiState.update {
+                        it.copy(
+                            isFetchingModels = false,
+                            fetchedModels = models,
+                            fetchModelsError = if (models.isEmpty()) "Endpoint returned 0 models." else null
+                        )
+                    }
+                    if (models.isNotEmpty()) {
+                        appendIdeLog("M.A.X. AI", "Fetched ${models.size} model(s) from ${provider.displayName}")
+                    }
+                }
+                .onFailure { err ->
+                    _uiState.update {
+                        it.copy(
+                            isFetchingModels = false,
+                            fetchModelsError = err.message ?: "Failed to fetch available models"
+                        )
+                    }
+                }
+        }
+    }
+
+    fun sendAiPrompt(
+        prompt: String,
+        attachActiveFile: Boolean,
+        attachedExtraPaths: List<String> = emptyList()
+    ) {
         val cleanPrompt = prompt.trim()
         if (cleanPrompt.isEmpty()) return
         val currentSettings = settings.value
@@ -761,6 +1567,21 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(aiMessages = it.aiMessages + userMsg, isAiLoading = true) }
 
         viewModelScope.launch {
+            if (project != null) {
+                dao.insertAiMessage(userMsg.toEntity(project.id))
+            }
+            val extraContext = withContext(Dispatchers.IO) {
+                if (project == null) emptyList()
+                else attachedExtraPaths.distinct().take(5).mapNotNull { rel ->
+                    runCatching {
+                        val f = fileManager.resolveSafe(project, rel)
+                        if (f.exists() && f.isFile && f.length() <= WorkspaceFileManager.MAX_EDITABLE_BYTES) {
+                            rel to f.readText()
+                        } else null
+                    }.getOrNull()
+                }
+            }
+
             val result: Result<AiGatewayResponse> = aiGateway.sendPrompt(
                 provider = currentSettings.aiProvider,
                 apiKey = key,
@@ -769,6 +1590,7 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
                 userPrompt = cleanPrompt,
                 activeFilePath = if (attachActiveFile) activeTab?.relativePath else null,
                 activeFileContent = if (attachActiveFile) activeTab?.content else null,
+                additionalContextFiles = extraContext,
                 redactSecrets = currentSettings.redactSecretsInAi,
                 existingFileLookup = { relPath ->
                     if (project == null) null
@@ -788,7 +1610,18 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
                     timestampMs = System.currentTimeMillis(),
                     proposedChanges = resp.proposedChanges
                 )
-                _uiState.update { it.copy(aiMessages = it.aiMessages + reply, isAiLoading = false) }
+                if (project != null) {
+                    dao.insertAiMessage(reply.toEntity(project.id))
+                }
+                _uiState.update { state ->
+                    val merged = if (state.aiMessages.any { it.id == reply.id }) state.aiMessages else state.aiMessages + reply
+                    state.copy(aiMessages = merged, isAiLoading = false)
+                }
+                if (!currentSettings.confirmAiChanges && resp.proposedChanges.isNotEmpty()) {
+                    resp.proposedChanges.forEach { change ->
+                        applyAiProposedChange(reply.id, change)
+                    }
+                }
             }.onFailure { err ->
                 val reply = AiChatMessage(
                     id = UUID.randomUUID().toString(),
@@ -797,7 +1630,13 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
                     timestampMs = System.currentTimeMillis(),
                     isError = true
                 )
-                _uiState.update { it.copy(aiMessages = it.aiMessages + reply, isAiLoading = false) }
+                if (project != null) {
+                    dao.insertAiMessage(reply.toEntity(project.id))
+                }
+                _uiState.update { state ->
+                    val merged = if (state.aiMessages.any { it.id == reply.id }) state.aiMessages else state.aiMessages + reply
+                    state.copy(aiMessages = merged, isAiLoading = false)
+                }
             }
         }
     }
@@ -810,6 +1649,7 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
                 target.parentFile?.mkdirs()
                 target.writeText(change.proposedContent, Charsets.UTF_8)
             }.onSuccess {
+                var updatedTargetMsg: AiChatMessage? = null
                 _uiState.update { state ->
                     val updatedMessages = state.aiMessages.map { msg ->
                         if (msg.id == messageId) {
@@ -817,7 +1657,7 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
                                 proposedChanges = msg.proposedChanges.map { p ->
                                     if (p.relativePath == change.relativePath) p.copy(isApplied = true) else p
                                 }
-                            )
+                            ).also { updatedTargetMsg = it }
                         } else msg
                     }
                     val updatedTabs = state.openTabs.map { tab ->
@@ -827,11 +1667,147 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     state.copy(aiMessages = updatedMessages, openTabs = updatedTabs)
                 }
+                updatedTargetMsg?.let { dao.insertAiMessage(it.toEntity(project.id)) }
                 refreshWorkspaceFilesAndAnalysis(project)
                 postMessage("Applied approved patch to ${change.relativePath}")
             }.onFailure {
                 postMessage("Patch apply blocked: ${it.message}")
             }
+        }
+    }
+
+    fun sendVisualBuilderAiCommand(prompt: String) {
+        val currentSettings = settings.value
+        val key = vault.readSecret(vault.slotForAiProvider(currentSettings.aiProvider)).orEmpty()
+        viewModelScope.launch {
+            _uiState.update { it.copy(isAiLoading = true) }
+            val systemContext = "The user is using M.A.X. Studio Visual Builder. Current visual nodes: ${_uiState.value.visualNodes.map { it.label }}. User prompt: $prompt. Return a short description or component title to generate."
+            val result = aiGateway.sendPrompt(
+                provider = currentSettings.aiProvider,
+                apiKey = key,
+                model = currentSettings.aiModel,
+                baseUrl = currentSettings.aiBaseUrl,
+                userPrompt = systemContext,
+                activeFilePath = null,
+                activeFileContent = null,
+                additionalContextFiles = emptyList(),
+                redactSecrets = currentSettings.redactSecretsInAi,
+                existingFileLookup = { _ -> null }
+            )
+            result.onSuccess { resp ->
+                val text = resp.text.trim()
+                val newNodeType = when {
+                    text.contains("button", true) -> VisualComponentType.BUTTON
+                    text.contains("card", true) -> VisualComponentType.CARD
+                    text.contains("switch", true) -> VisualComponentType.SWITCH_CONTROL
+                    text.contains("input", true) || text.contains("field", true) -> VisualComponentType.TEXT_FIELD
+                    else -> VisualComponentType.TEXT
+                }
+                val nodeLabel = text.take(35).ifBlank { prompt.take(35) }
+                val node = VisualNode(
+                    id = UUID.randomUUID().toString().take(6),
+                    type = newNodeType,
+                    label = nodeLabel,
+                    secondaryText = "AI Generated"
+                )
+                _uiState.update { st ->
+                    st.copy(
+                        visualNodes = st.visualNodes + node,
+                        isAiLoading = false,
+                        statusMessage = "AI Command executed successfully"
+                    )
+                }
+                syncVisualBuilderToCodeTab()
+            }.onFailure { err ->
+                _uiState.update { st ->
+                    st.copy(
+                        isAiLoading = false,
+                        statusMessage = "AI command failed: ${err.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun saveChatHistoryToWorkspace() {
+        val project = _uiState.value.activeProject ?: return
+        val messages = _uiState.value.aiMessages
+        if (messages.isEmpty()) {
+            postMessage("No chat messages to save.")
+            return
+        }
+        val sb = StringBuilder()
+        sb.append("# M.A.X. Core AI Conversation History\n")
+        sb.append("Project: ${project.name} (${project.packageName})\n")
+        sb.append("Saved At: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())}\n\n---\n\n")
+        messages.forEach { msg ->
+            val sender = if (msg.isUser) "User" else "M.A.X. AI"
+            val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(msg.timestampMs))
+            sb.append("### [$time] $sender\n\n${msg.text}\n\n")
+            if (msg.proposedChanges.isNotEmpty()) {
+                sb.append("**Proposed Changes:**\n")
+                msg.proposedChanges.forEach { p ->
+                    sb.append("- `${p.relativePath}` (${if (p.isApplied) "Applied" else "Pending"})\n")
+                }
+                sb.append("\n")
+            }
+            sb.append("---\n\n")
+        }
+        val filename = "ai_chat_history_${System.currentTimeMillis().toString().takeLast(6)}.md"
+        viewModelScope.launch {
+            fileManager.createFileOrFolder(project, filename, isDirectory = false, initialContent = sb.toString())
+                .onSuccess {
+                    refreshWorkspaceFilesAndAnalysis(project)
+                    openFileInEditor(filename, jumpToEditorTab = true)
+                    postMessage("Saved chat history to workspace: $filename")
+                }
+                .onFailure {
+                    postMessage("Failed to save chat history: ${it.message}")
+                }
+        }
+    }
+
+    fun applyCodeBlockToActiveEditor(code: String) {
+        val active = _uiState.value.activeTab
+        if (active != null && active.previewMode == FilePreviewKind.CODE_TEXT && !active.isLargeFilePreview) {
+            updateActiveTabContent(code)
+            _uiState.update { it.copy(currentTab = PrimaryDestination.EDITOR, activeLabSection = null) }
+            setEditorWorkspaceMode("CODE")
+            postMessage("Applied AI code to ${active.relativePath.substringAfterLast('/')}")
+            return
+        }
+        val project = _uiState.value.activeProject ?: return
+        val pkgPath = project.packageName.replace('.', '/')
+        val targetPath = "app/src/main/java/$pkgPath/MaxGeneratedSnippet.kt"
+        createFileOrFolder(targetPath, false, code)
+        _uiState.update { it.copy(currentTab = PrimaryDestination.EDITOR, activeLabSection = null) }
+        setEditorWorkspaceMode("CODE")
+    }
+
+    fun fixProblemsWithAi() {
+        val issues = _uiState.value.diagnostics
+        _uiState.update { it.copy(currentTab = PrimaryDestination.AI_STUDIO, activeLabSection = null) }
+        if (issues.isEmpty()) {
+            postMessage("No workspace diagnostics to fix")
+            return
+        }
+        val summary = issues.take(20).joinToString("\n") {
+            "- [${it.severity.name}] ${it.filePath}:${it.line} (${it.source}): ${it.message}"
+        }
+        val affectedFiles = issues.map { it.filePath }.distinct().take(4)
+        sendAiPrompt(
+            prompt = "Fix these workspace diagnostics and propose clean <<<FILE: ...>>> patches:\n\n$summary",
+            attachActiveFile = true,
+            attachedExtraPaths = affectedFiles
+        )
+    }
+
+    fun clearAiConversation() {
+        val project = _uiState.value.activeProject ?: return
+        viewModelScope.launch {
+            dao.deleteAiMessagesForProject(project.id)
+            _uiState.update { it.copy(aiMessages = emptyList()) }
+            postMessage("Cleared AI conversation for ${project.name}")
         }
     }
 
@@ -845,13 +1821,15 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
 
     fun inspectGitHubRepo(ownerRepo: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isGitHubLoading = true) }
+            _uiState.update { it.copy(isGitHubLoading = true, gitHubError = null) }
             val token = vault.readSecret(vault.githubTokenSlot)
-            gitHubClient.fetchRepositoryStatus(ownerRepo, token)
-                .onSuccess { status -> _uiState.update { it.copy(gitHubStatus = status, isGitHubLoading = false) } }
+            val branch = settings.value.defaultGitBranch
+            gitHubClient.fetchRepositoryStatus(ownerRepo, token, preferredBranch = branch)
+                .onSuccess { status -> _uiState.update { it.copy(gitHubStatus = status, gitHubError = null, isGitHubLoading = false) } }
                 .onFailure { e ->
-                    _uiState.update { it.copy(isGitHubLoading = false) }
-                    postMessage("GitHub check failed: ${e.message}")
+                    val errText = e.message ?: "GitHub request failed"
+                    _uiState.update { it.copy(isGitHubLoading = false, gitHubError = errText) }
+                    postMessage("GitHub check failed: $errText")
                 }
         }
     }
@@ -884,9 +1862,26 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
             }
     }
 
-    fun saveAiProviderConfig(provider: AiProviderType, model: String, baseUrl: String, apiKey: String?, redactSecrets: Boolean) {
+    fun saveAiProviderConfig(
+        provider: AiProviderType,
+        model: String,
+        baseUrl: String,
+        apiKey: String?,
+        redactSecrets: Boolean,
+        confirmChanges: Boolean = settings.value.confirmAiChanges,
+        fastModel: String = settings.value.aiFastModel,
+        proModel: String = settings.value.aiProModel
+    ) {
         viewModelScope.launch {
-            preferences.updateAiConfig(provider, model, baseUrl, redactSecrets)
+            preferences.updateAiConfig(
+                provider = provider,
+                model = model,
+                baseUrl = baseUrl,
+                redactSecrets = redactSecrets,
+                confirmChanges = confirmChanges,
+                fastModel = fastModel,
+                proModel = proModel
+            )
             if (apiKey != null && apiKey.isNotBlank()) {
                 val ok = vault.saveSecret(vault.slotForAiProvider(provider), apiKey)
                 postMessage(if (ok) "Encrypted ${provider.displayName} key saved in Keystore" else "Failed to encrypt key")
@@ -906,14 +1901,62 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
         postMessage(if (ok) "GitHub PAT encrypted in Keystore" else "Keystore unavailable")
     }
 
-    fun updateEditorSettings(fontSize: Int, tabWidth: Int, autoSave: Boolean, lineNumbers: Boolean, wordWrap: Boolean) {
+    fun saveGitHubConfig(token: String?, defaultBranch: String) {
         viewModelScope.launch {
-            preferences.updateEditorPrefs(fontSize, tabWidth, autoSave, lineNumbers, wordWrap)
+            preferences.setDefaultGitBranch(defaultBranch)
+            val cleanToken = token?.trim().orEmpty()
+            if (cleanToken.isNotEmpty()) {
+                val ok = vault.saveSecret(vault.githubTokenSlot, cleanToken)
+                postMessage(if (ok) "GitHub token & branch '$defaultBranch' saved" else "Keystore unavailable")
+            } else {
+                postMessage("Saved default branch '$defaultBranch'")
+            }
+        }
+    }
+
+    fun clearGitHubToken() {
+        vault.clearSecret(vault.githubTokenSlot)
+        postMessage("Cleared GitHub token")
+    }
+
+    fun updateEditorSettings(
+        fontSize: Int,
+        tabWidth: Int,
+        autoSave: Boolean,
+        lineNumbers: Boolean,
+        wordWrap: Boolean,
+        formatOnSave: Boolean = settings.value.formatOnSave
+    ) {
+        viewModelScope.launch {
+            preferences.updateEditorPrefs(fontSize, tabWidth, autoSave, lineNumbers, wordWrap, formatOnSave)
         }
     }
 
     fun setReducedMotion(enabled: Boolean) {
         viewModelScope.launch { preferences.setReducedMotion(enabled) }
+    }
+
+    fun resetAllSettings() {
+        viewModelScope.launch {
+            preferences.resetAllToDefaults()
+            _uiState.update { it.copy(previewThemeTokens = null) }
+            postMessage("Reset all settings to default")
+        }
+    }
+
+    fun exportSettingsJsonString(): String = LdroidPreferences.exportSettingsJson(settings.value)
+
+    fun importSettingsJson(rawJson: String) {
+        viewModelScope.launch {
+            preferences.importSettingsJson(rawJson)
+                .onSuccess {
+                    _uiState.update { it.copy(previewThemeTokens = null) }
+                    postMessage("Imported IDE settings successfully")
+                }
+                .onFailure { err ->
+                    postMessage("Settings import failed: ${err.message}")
+                }
+        }
     }
 
     fun runFullWorkspaceStaticAudit() {
@@ -922,6 +1965,71 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
             refreshWorkspaceFilesAndAnalysis(project)
             postMessage("Static & secret scan complete: ${_uiState.value.diagnostics.size} finding(s)")
         }
+    }
+
+    fun runSystemVerification() {
+        if (_uiState.value.isRunningVerification) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isRunningVerification = true) }
+            val report = RoadmapRegistry.runLiveVerification(
+                context = getApplication(),
+                activeProjectRoot = _uiState.value.activeProject?.rootPath,
+                settings = settings.value,
+                vault = vault,
+                fileManager = fileManager,
+                terminalManager = terminalManager,
+                workspaceFileCount = _uiState.value.workspaceFiles.size,
+                visualNodes = _uiState.value.visualNodes
+            )
+            _uiState.update { it.copy(verificationReport = report, isRunningVerification = false) }
+            appendIdeLog("Verification", "System Verification finished: ${report.passedCount}/${report.items.size} VERIFIED (${report.durationMs}ms)")
+        }
+    }
+
+    fun clearIdeOutputLogs() {
+        _uiState.update { it.copy(ideOutputLogs = emptyList()) }
+    }
+
+    private fun appendIdeLog(source: String, message: String, isError: Boolean = false) {
+        val ts = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+        val entry = IdeLogEntry(
+            id = UUID.randomUUID().toString().take(8),
+            timestamp = ts,
+            source = source,
+            message = message,
+            isError = isError
+        )
+        _uiState.update { state ->
+            state.copy(ideOutputLogs = (state.ideOutputLogs + entry).takeLast(120))
+        }
+    }
+
+    private fun persistCurrentTabs() {
+        val project = _uiState.value.activeProject ?: return
+        val tabPaths = _uiState.value.openTabs.map { it.relativePath }
+        val active = _uiState.value.activeTabPath
+        viewModelScope.launch {
+            preferences.saveProjectOpenTabs(project.id, tabPaths, active)
+        }
+    }
+
+    private fun readPersistedTabs(projectId: String): Pair<List<String>, String?> {
+        val raw = settings.value.persistedTabsJson
+        return runCatching {
+            val root = org.json.JSONObject(raw)
+            val proj = root.optJSONObject(projectId) ?: return emptyList<String>() to null
+            val arr = proj.optJSONArray("tabs")
+            val paths = buildList {
+                if (arr != null) {
+                    for (i in 0 until arr.length()) {
+                        val s = arr.optString(i, "")
+                        if (s.isNotBlank()) add(s)
+                    }
+                }
+            }
+            val active = proj.optString("active", "").ifBlank { null }
+            paths to active
+        }.getOrDefault(emptyList<String>() to null)
     }
 
     private suspend fun refreshWorkspaceFilesAndAnalysis(project: ProjectEntity) {
@@ -938,5 +2046,57 @@ class LdroidViewModel(application: Application) : AndroidViewModel(application) 
                 architectureNodes = arch
             )
         }
+    }
+
+    private fun AiChatMessage.toEntity(projectId: String): AiMessageEntity {
+        val arr = org.json.JSONArray()
+        proposedChanges.forEach { ch ->
+            arr.put(
+                org.json.JSONObject().apply {
+                    put("relativePath", ch.relativePath)
+                    if (ch.originalContent != null) put("originalContent", ch.originalContent)
+                    put("proposedContent", ch.proposedContent)
+                    put("isApplied", ch.isApplied)
+                }
+            )
+        }
+        return AiMessageEntity(
+            id = id,
+            projectId = projectId,
+            isUser = isUser,
+            text = text,
+            timestampMs = timestampMs,
+            isError = isError,
+            proposedChangesJson = arr.toString()
+        )
+    }
+
+    private fun AiMessageEntity.toDomain(): AiChatMessage {
+        val changes = runCatching {
+            val arr = org.json.JSONArray(proposedChangesJson)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    add(
+                        AiProposedFileChange(
+                            relativePath = obj.optString("relativePath"),
+                            originalContent = if (obj.has("originalContent") && !obj.isNull("originalContent")) {
+                                obj.optString("originalContent")
+                            } else null,
+                            proposedContent = obj.optString("proposedContent"),
+                            isApplied = obj.optBoolean("isApplied", false)
+                        )
+                    )
+                }
+            }
+        }.getOrDefault(emptyList())
+        return AiChatMessage(
+            id = id,
+            isUser = isUser,
+            text = text,
+            timestampMs = timestampMs,
+            proposedChanges = changes,
+            isError = isError
+        )
     }
 }

@@ -1,6 +1,6 @@
 {
-  "name": "LDROID",
-  "description": "LDROID — Offline-first, guest-capable Android Development IDE with 10 themes, live preview, terminal, APK/AAB analyzer, and BYOK AI Studio",
+  "name": "M.A.X. Studio",
+  "description": "M.A.X. Studio (Modular AI eXecutor) — Jarvis-inspired mobile AI IDE with dynamic model fetching, interactive visual builder, live preview, terminal, and static diagnostics",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

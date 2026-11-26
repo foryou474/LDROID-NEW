@@ -37,4 +37,13 @@ interface LdroidDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSnapshot(snapshot: WorkspaceSnapshotEntity)
+
+    @Query("SELECT * FROM ai_chat_messages WHERE projectId = :projectId ORDER BY timestampMs ASC")
+    fun observeAiMessages(projectId: String): Flow<List<AiMessageEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAiMessage(message: AiMessageEntity)
+
+    @Query("DELETE FROM ai_chat_messages WHERE projectId = :projectId")
+    suspend fun deleteAiMessagesForProject(projectId: String)
 }

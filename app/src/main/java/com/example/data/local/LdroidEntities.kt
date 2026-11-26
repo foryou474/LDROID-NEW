@@ -34,3 +34,14 @@ data class WorkspaceSnapshotEntity(
     val totalBytes: Long,
     val createdAtMs: Long
 )
+
+@Entity(tableName = "ai_chat_messages")
+data class AiMessageEntity(
+    @PrimaryKey val id: String,
+    val projectId: String,
+    val isUser: Boolean,
+    val text: String,
+    val timestampMs: Long,
+    val isError: Boolean = false,
+    val proposedChangesJson: String = "[]"
+)

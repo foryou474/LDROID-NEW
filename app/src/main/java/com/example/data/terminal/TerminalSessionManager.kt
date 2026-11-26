@@ -30,7 +30,15 @@ data class TerminalSession(
     val workingDir: String,
     val lines: List<TerminalLine> = emptyList(),
     val isRunning: Boolean = false,
-    val commandHistory: List<String> = emptyList()
+    val commandHistory: List<String> = emptyList(),
+    val lastExitCode: Int? = null
+)
+
+data class TerminalCommandHooks(
+    val onWorkspaceChanged: suspend () -> Unit = {},
+    val onGitStatus: suspend () -> List<TerminalLine> = { emptyList() },
+    val onGitDiff: suspend () -> List<TerminalLine> = { emptyList() },
+    val onGradleBuild: suspend (String) -> Pair<Int, List<TerminalLine>> = { 0 to emptyList() }
 )
 
 data class ToolchainProbeReport(
@@ -66,16 +74,21 @@ class TerminalSessionManager(private val context: Context) {
         return createSession(workDir, "Shell 1")
     }
 
+    private fun shortPromptName(workDir: String): String {
+        val rawName = File(workDir).name.ifBlank { "MaxStarterApp" }
+        return rawName.replace(Regex("""_[0-9a-f]{8}$"""), "").ifBlank { rawName }
+    }
+
     fun createSession(workDir: String, title: String = "Shell ${_sessions.value.size + 1}"): String {
         val id = UUID.randomUUID().toString().take(8)
+        val promptLabel = shortPromptName(workDir)
         val session = TerminalSession(
             id = id,
             title = title,
             workingDir = workDir,
             lines = listOf(
-                TerminalLine(text = "LDROID Terminal Session [$title]", isPrompt = true),
-                TerminalLine(text = "Working dir: $workDir"),
-                TerminalLine(text = "Type a shell command (e.g., ls -la, pwd, uname -a, env) or 'clear'.")
+                TerminalLine(text = "M.A.X. Studio Terminal [$title] — type 'help' for commands", isPrompt = true),
+                TerminalLine(text = "max@studio:~/$promptLabel $ ready")
             )
         )
         _sessions.update { it + session }
@@ -85,8 +98,18 @@ class TerminalSessionManager(private val context: Context) {
     fun closeSession(sessionId: String) {
         cancelCommand(sessionId)
         _sessions.update { list ->
-            val filtered = list.filterNot { it.id == sessionId }
-            filtered
+            list.filterNot { it.id == sessionId }
+        }
+    }
+
+    fun clearSession(sessionId: String) {
+        _sessions.update { list ->
+            list.map { s ->
+                if (s.id == sessionId) {
+                    val promptLabel = shortPromptName(s.workingDir)
+                    s.copy(lines = listOf(TerminalLine(text = "max@studio:~/$promptLabel $", isPrompt = true)))
+                } else s
+            }
         }
     }
 
@@ -96,14 +119,18 @@ class TerminalSessionManager(private val context: Context) {
         }
     }
 
-    suspend fun runCommand(sessionId: String, rawCommand: String) = withContext(Dispatchers.IO) {
+    suspend fun runCommand(
+        sessionId: String,
+        rawCommand: String,
+        hooks: TerminalCommandHooks = TerminalCommandHooks()
+    ) = withContext(Dispatchers.IO) {
         val cmd = rawCommand.trim()
         if (cmd.isEmpty()) return@withContext
 
         if (cmd == "clear") {
             _sessions.update { list ->
                 list.map { s ->
-                    if (s.id == sessionId) s.copy(lines = emptyList(), commandHistory = (s.commandHistory + cmd).takeLast(30))
+                    if (s.id == sessionId) s.copy(lines = emptyList(), commandHistory = (s.commandHistory + cmd).takeLast(30), lastExitCode = 0)
                     else s
                 }
             }
@@ -112,6 +139,7 @@ class TerminalSessionManager(private val context: Context) {
 
         val session = _sessions.value.firstOrNull { it.id == sessionId } ?: return@withContext
         val dir = File(session.workingDir).takeIf { it.exists() && it.isDirectory } ?: context.filesDir
+        val promptLabel = shortPromptName(dir.absolutePath)
 
         _sessions.update { list ->
             list.map { s ->
@@ -119,26 +147,71 @@ class TerminalSessionManager(private val context: Context) {
                     s.copy(
                         isRunning = true,
                         commandHistory = (s.commandHistory + cmd).takeLast(30),
-                        lines = (s.lines + TerminalLine(text = "$ $cmd", isPrompt = true)).takeLast(400)
+                        lines = (s.lines + TerminalLine(text = "max@studio:~/$promptLabel $ $cmd", isPrompt = true)).takeLast(400)
                     )
                 } else s
             }
         }
 
-        // Intercept explicit `cd` so working directory persists cleanly inside the session
-        if (cmd == "cd" || cmd.startsWith("cd ")) {
-            val arg = cmd.removePrefix("cd").trim()
-            val target = if (arg.isEmpty()) context.filesDir else File(dir, arg).canonicalFile
-            val outputLine = if (target.exists() && target.isDirectory) {
-                updateWorkingDirectory(sessionId, target.absolutePath)
-                TerminalLine(text = target.absolutePath)
-            } else {
-                TerminalLine(text = "cd: no such directory: $arg", isError = true)
+        val parts = cmd.split(Regex("""\s+"""))
+        val head = parts.firstOrNull().orEmpty().lowercase()
+        val args = parts.drop(1)
+
+        // Built-in workspace-aware commands (guaranteed functional on every Android device/sandbox)
+        val builtInResult: Pair<Int, List<TerminalLine>>? = when {
+            head == "help" -> 0 to listOf(
+                TerminalLine(text = "M.A.X. Studio Workspace Commands:", isPrompt = true),
+                TerminalLine(text = "  ls [dir]        List files & folders in workspace"),
+                TerminalLine(text = "  pwd             Print current working directory"),
+                TerminalLine(text = "  cd <dir>        Change directory"),
+                TerminalLine(text = "  cat <file>      Print file contents"),
+                TerminalLine(text = "  mkdir <dir>     Create directory"),
+                TerminalLine(text = "  touch <file>    Create empty file"),
+                TerminalLine(text = "  rm <path>       Delete file or folder"),
+                TerminalLine(text = "  git status      Show modified/added/deleted workspace files"),
+                TerminalLine(text = "  git diff        Show unified diff against baseline snapshot"),
+                TerminalLine(text = "  gradle build    Run full workspace syntax & lint verification"),
+                TerminalLine(text = "  clear           Clear terminal output")
+            )
+            head == "pwd" -> 0 to listOf(
+                TerminalLine(text = "~/$promptLabel (${dir.absolutePath})")
+            )
+            head == "cd" -> {
+                val arg = cmd.removePrefix("cd").trim()
+                val target = if (arg.isEmpty()) context.filesDir else File(dir, arg).canonicalFile
+                if (target.exists() && target.isDirectory) {
+                    updateWorkingDirectory(sessionId, target.absolutePath)
+                    0 to listOf(TerminalLine(text = target.absolutePath))
+                } else {
+                    1 to listOf(TerminalLine(text = "cd: no such directory: $arg", isError = true))
+                }
             }
+            head == "ls" -> handleLs(dir, args)
+            head == "cat" -> handleCat(dir, args)
+            head == "mkdir" -> handleMkdir(dir, args).also { (code, _) -> if (code == 0) hooks.onWorkspaceChanged() }
+            head == "touch" -> handleTouch(dir, args).also { (code, _) -> if (code == 0) hooks.onWorkspaceChanged() }
+            head == "rm" -> handleRm(dir, args).also { (code, _) -> if (code == 0) hooks.onWorkspaceChanged() }
+            cmd.equals("git status", ignoreCase = true) -> 0 to hooks.onGitStatus()
+            cmd.equals("git diff", ignoreCase = true) -> 0 to hooks.onGitDiff()
+            head == "gradle" || head == "./gradlew" || head == "gradlew" -> {
+                val task = args.firstOrNull() ?: "build"
+                hooks.onGradleBuild(task)
+            }
+            else -> null
+        }
+
+        if (builtInResult != null) {
+            val (exitCode, outLines) = builtInResult
             _sessions.update { list ->
                 list.map { s ->
-                    if (s.id == sessionId) s.copy(isRunning = false, lines = (s.lines + outputLine).takeLast(400))
-                    else s
+                    if (s.id == sessionId) {
+                        val suffix = if (exitCode == 0) emptyList() else listOf(TerminalLine(text = "[exit $exitCode]", isError = true))
+                        s.copy(
+                            isRunning = false,
+                            lastExitCode = exitCode,
+                            lines = (s.lines + outLines + suffix).takeLast(400)
+                        )
+                    } else s
                 }
             }
             return@withContext
@@ -176,14 +249,20 @@ class TerminalSessionManager(private val context: Context) {
             stderrThread.join(1500)
             activeProcesses.remove(sessionId)
 
-            appendLine(
-                sessionId,
-                TerminalLine(
-                    text = "[exit $exitCode]",
-                    isError = exitCode != 0,
-                    isPrompt = exitCode == 0
-                )
-            )
+            _sessions.update { list ->
+                list.map { s ->
+                    if (s.id == sessionId) {
+                        s.copy(
+                            lastExitCode = exitCode,
+                            lines = (s.lines + TerminalLine(
+                                text = "[exit $exitCode]",
+                                isError = exitCode != 0,
+                                isPrompt = exitCode == 0
+                            )).takeLast(400)
+                        )
+                    } else s
+                }
+            }
         } catch (e: Exception) {
             appendLine(sessionId, TerminalLine(text = "Execution error: ${e.message}", isError = true))
         } finally {
@@ -192,6 +271,134 @@ class TerminalSessionManager(private val context: Context) {
                 list.map { s -> if (s.id == sessionId) s.copy(isRunning = false) else s }
             }
         }
+    }
+
+    private fun handleLs(dir: File, args: List<String>): Pair<Int, List<TerminalLine>> {
+        val showAll = args.any { it.startsWith("-") && it.contains("a") }
+        val longFmt = args.any { it.startsWith("-") && it.contains("l") }
+        val pathArg = args.firstOrNull { !it.startsWith("-") }
+        val target = if (pathArg == null) dir else File(dir, pathArg).canonicalFile
+        if (!target.exists()) {
+            return 1 to listOf(TerminalLine(text = "ls: cannot access '${pathArg ?: "."}': No such file or directory", isError = true))
+        }
+        val entries = if (target.isDirectory) {
+            target.listFiles()
+                ?.filter { showAll || !it.name.startsWith(".") }
+                ?.sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name })
+                .orEmpty()
+        } else listOf(target)
+        if (entries.isEmpty()) return 0 to listOf(TerminalLine(text = "(empty directory)"))
+        val lines = entries.map { f ->
+            val label = if (f.isDirectory) "${f.name}/" else f.name
+            if (longFmt) {
+                val typeChar = if (f.isDirectory) "d" else "-"
+                val size = if (f.isDirectory) "-" else "${f.length()}B"
+                TerminalLine(text = "$typeChar  ${size.padStart(8)}  $label")
+            } else {
+                TerminalLine(text = label)
+            }
+        }
+        return 0 to lines
+    }
+
+    private fun handleCat(dir: File, args: List<String>): Pair<Int, List<TerminalLine>> {
+        val pathArg = args.firstOrNull()
+            ?: return 1 to listOf(TerminalLine(text = "usage: cat <relative-file-path>", isError = true))
+        val target = File(dir, pathArg).canonicalFile
+        if (!target.exists() || !target.isFile) {
+            return 1 to listOf(TerminalLine(text = "cat: $pathArg: No such file", isError = true))
+        }
+        if (target.length() > 128 * 1024) {
+            return 1 to listOf(TerminalLine(text = "cat: $pathArg exceeds 128KB terminal preview limit", isError = true))
+        }
+        val contentLines = runCatching { target.readLines() }.getOrElse {
+            return 1 to listOf(TerminalLine(text = "cat: failed reading $pathArg: ${it.message}", isError = true))
+        }
+        return 0 to contentLines.take(200).mapIndexed { idx, line ->
+            TerminalLine(text = "${(idx + 1).toString().padStart(3)} | $line")
+        }
+    }
+
+    private fun handleMkdir(dir: File, args: List<String>): Pair<Int, List<TerminalLine>> {
+        val targets = args.filter { !it.startsWith("-") }
+        if (targets.isEmpty()) {
+            return 1 to listOf(TerminalLine(text = "usage: mkdir <directory>", isError = true))
+        }
+        val out = mutableListOf<TerminalLine>()
+        var code = 0
+        for (rel in targets) {
+            val target = File(dir, rel).canonicalFile
+            if (!target.absolutePath.startsWith(dir.canonicalPath)) {
+                out.add(TerminalLine(text = "mkdir: blocked path outside workspace: $rel", isError = true))
+                code = 1
+                continue
+            }
+            if (target.exists()) {
+                out.add(TerminalLine(text = "mkdir: '$rel' already exists", isError = true))
+                code = 1
+            } else if (target.mkdirs()) {
+                out.add(TerminalLine(text = "Created directory '$rel'"))
+            } else {
+                out.add(TerminalLine(text = "mkdir: failed to create '$rel'", isError = true))
+                code = 1
+            }
+        }
+        return code to out
+    }
+
+    private fun handleTouch(dir: File, args: List<String>): Pair<Int, List<TerminalLine>> {
+        val targets = args.filter { !it.startsWith("-") }
+        if (targets.isEmpty()) {
+            return 1 to listOf(TerminalLine(text = "usage: touch <file>", isError = true))
+        }
+        val out = mutableListOf<TerminalLine>()
+        var code = 0
+        for (rel in targets) {
+            val target = File(dir, rel).canonicalFile
+            if (!target.absolutePath.startsWith(dir.canonicalPath)) {
+                out.add(TerminalLine(text = "touch: blocked path outside workspace: $rel", isError = true))
+                code = 1
+                continue
+            }
+            target.parentFile?.mkdirs()
+            if (!target.exists()) target.createNewFile() else target.setLastModified(System.currentTimeMillis())
+            out.add(TerminalLine(text = "Updated '$rel'"))
+        }
+        return code to out
+    }
+
+    private fun handleRm(dir: File, args: List<String>): Pair<Int, List<TerminalLine>> {
+        val recursive = args.any { it.startsWith("-") && (it.contains("r") || it.contains("f")) }
+        val targets = args.filter { !it.startsWith("-") }
+        if (targets.isEmpty()) {
+            return 1 to listOf(TerminalLine(text = "usage: rm [-rf] <path>", isError = true))
+        }
+        val out = mutableListOf<TerminalLine>()
+        var code = 0
+        val rootCanon = dir.canonicalPath
+        for (rel in targets) {
+            val target = File(dir, rel).canonicalFile
+            if (!target.absolutePath.startsWith(rootCanon) || target.absolutePath == rootCanon) {
+                out.add(TerminalLine(text = "rm: refused to remove '$rel'", isError = true))
+                code = 1
+                continue
+            }
+            if (!target.exists()) {
+                out.add(TerminalLine(text = "rm: '$rel': No such file or directory", isError = true))
+                code = 1
+            } else if (target.isDirectory && !recursive && !target.list().isNullOrEmpty()) {
+                out.add(TerminalLine(text = "rm: cannot remove '$rel': Is a non-empty directory (use rm -rf)", isError = true))
+                code = 1
+            } else {
+                val ok = if (target.isDirectory) target.deleteRecursively() else target.delete()
+                if (ok) out.add(TerminalLine(text = "Removed '$rel'"))
+                else {
+                    out.add(TerminalLine(text = "rm: failed removing '$rel'", isError = true))
+                    code = 1
+                }
+            }
+        }
+        return code to out
     }
 
     fun cancelCommand(sessionId: String) {
@@ -283,7 +490,7 @@ class TerminalSessionManager(private val context: Context) {
             gradleBinaryFound = gradle,
             javaCompilerFound = javac,
             virtualizationNote = if (!gradle && !adb) {
-                "Running inside sandboxed Android OS: local shell works, while full Gradle/JDK/AVD builds require host CI (GitHub Actions) or Termux/host toolchain."
+                "Running inside sandboxed Android OS: workspace shell (ls, cat, mkdir, rm, git, gradle lint) works locally; full APK compilation uses GitHub Actions CI."
             } else {
                 "Host toolchain binaries detected on PATH."
             }
