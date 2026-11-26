@@ -131,6 +131,7 @@ fun EditorScreen(
     val tokens = LocalLdroidTokens.current
     val context = LocalContext.current
     var primaryMode by remember { mutableStateOf(EditorPrimaryMode.CODE) }
+    var selectedTerminalTab by remember { mutableStateOf(BottomToolTab.TERMINAL) }
     var showExplorer by remember(isExpandedWidth) { mutableStateOf(isExpandedWidth) }
     var aiPanelStage by remember { mutableStateOf(AiPanelStage.HIDDEN) }
     var showCreateModal by remember { mutableStateOf(false) }
@@ -547,11 +548,11 @@ fun EditorScreen(
                         EditorBottomToolPanel(
                             uiState = uiState,
                             sessions = terminalSessions,
-                            selectedTab = BottomToolTab.TERMINAL,
+                            selectedTab = selectedTerminalTab,
                             panelHeightDp = 0, // 0 indicates full-screen terminal filling the workspace
-                            onSelectTab = {},
+                            onSelectTab = { selectedTerminalTab = it },
                             onResizeHeightDp = {},
-                            onCollapse = {},
+                            onCollapse = { primaryMode = EditorPrimaryMode.CODE },
                             viewModel = viewModel,
                             modifier = Modifier.fillMaxSize()
                         )

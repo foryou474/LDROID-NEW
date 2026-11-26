@@ -7,6 +7,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.analysis.ApkAnalyzer
@@ -68,9 +69,14 @@ class ExampleRobolectricTest {
     @Test
     fun navigatePrimaryTabsAndDeveloperLab() {
         composeTestRule.waitForIdle()
+        // App starts on the clean empty Editor screen
+        composeTestRule.onNodeWithTag("empty_editor_create_btn").assertIsDisplayed()
+
+        // Navigate to Home and open Developer Lab -> APK/AAB Analyzer and return
+        composeTestRule.onNodeWithTag("nav_home").performClick()
+        composeTestRule.waitForIdle()
         composeTestRule.onNodeWithText("M.A.X. STUDIO").assertIsDisplayed()
 
-        // Open Developer Lab -> APK/AAB Analyzer and return
         composeTestRule.onNodeWithTag("home_lazy_column")
             .performScrollToNode(hasTestTag("lab_apk_analyzer"))
         composeTestRule.onNodeWithTag("lab_apk_analyzer").performClick()
@@ -79,14 +85,14 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("lab_back_button").performClick()
         composeTestRule.waitForIdle()
 
-        // Navigate across primary tabs
+        // Navigate across remaining primary tabs
         composeTestRule.onNodeWithTag("nav_projects").performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("new_project_btn").assertIsDisplayed()
 
         composeTestRule.onNodeWithTag("nav_editor").performClick()
         composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("toggle_explorer_btn").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("toolbar_files_btn").assertIsDisplayed()
 
         composeTestRule.onNodeWithTag("nav_ai_studio").performClick()
         composeTestRule.waitForIdle()
@@ -100,34 +106,60 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun editorM55AppBarToolbarAndBottomPanelWork() {
+    fun editorToolbarEmptyStateAndTerminalModeWork() {
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("nav_editor").performClick()
         composeTestRule.waitForIdle()
 
-        composeTestRule.onNodeWithTag("drawer_menu_btn").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("editor_search_btn").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("editor_more_actions_btn").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("toggle_explorer_btn").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("editor_undo_btn").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("editor_redo_btn").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("editor_save_btn").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("toggle_terminal_btn").assertIsDisplayed()
+        // Top action bar
+        composeTestRule.onNodeWithTag("editor_ai_pill_btn").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("toolbar_files_btn").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("toolbar_undo_btn").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("toolbar_redo_btn").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("toolbar_save_btn").assertIsDisplayed()
+
+        // Code sub-mode bar & empty-editor CTAs
+        composeTestRule.onNodeWithTag("submode_code").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("submode_visual_builder").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("submode_live_preview").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("code_header_create_btn").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("code_header_import_btn").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("empty_editor_create_btn").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("empty_editor_new_file_btn").assertIsDisplayed()
+
+        // Bottom primary mode switcher
+        composeTestRule.onNodeWithTag("primary_mode_code").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("primary_mode_terminal").assertIsDisplayed()
+
+        // Toggle Compact AI Assistant bar via top-left AI pill
+        composeTestRule.onNodeWithTag("editor_ai_pill_btn").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("ai_compact_input").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("ai_compact_close_btn").performClick()
+        composeTestRule.waitForIdle()
+
+        // Open Create modal from empty state and create a template file
+        composeTestRule.onNodeWithTag("empty_editor_create_btn").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("create_file_path_input").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("confirm_create_btn").performClick()
+        composeTestRule.waitForIdle()
+
+        // Switch to Terminal primary mode and cycle bottom tool tabs
+        composeTestRule.onNodeWithTag("primary_mode_terminal").performClick()
+        composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("terminal_command_input").assertIsDisplayed()
 
-        // Toggle Find & Replace overlay via AppBar Search icon
-        composeTestRule.onNodeWithTag("editor_search_btn").performClick()
-        composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("find_input").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("replace_input").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("replace_all_btn").assertIsDisplayed()
-
-        // Switch bottom tool tabs (Build & Logcat)
-        composeTestRule.onNodeWithText("Build").performClick()
+        composeTestRule.onNodeWithText("Build").performScrollTo().performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithText("Run Build Check").assertIsDisplayed()
 
-        composeTestRule.onNodeWithText("Logcat").performClick()
+        composeTestRule.onNodeWithText("Logcat").performScrollTo().performClick()
         composeTestRule.waitForIdle()
+
+        // Return to Code primary mode
+        composeTestRule.onNodeWithTag("primary_mode_code").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("submode_code").assertIsDisplayed()
     }
 }
