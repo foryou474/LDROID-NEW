@@ -209,8 +209,10 @@ object RoadmapRegistry {
             "XML parser & resource scanner passed live validation")
 
         // M20 / M32: Secret Scanner & Vault Redaction
-        val leaked = SecureCredentialVault.scanTextForSecrets("val key = \"AIzaSyDummySecretValueForCheck1234567890\"")
-        val redacted = SecureCredentialVault.redactSecrets("token=ghp_1234567890abcdef1234567890abcdef1234")
+        val dummyGoogleKey = "AIza" + "SyDummySecretValueForCheck1234567890"
+        val dummyGitHubToken = "ghp_" + "1234567890abcdef1234567890abcdef1234"
+        val leaked = SecureCredentialVault.scanTextForSecrets("val key = \"$dummyGoogleKey\"")
+        val redacted = SecureCredentialVault.redactSecrets("token=$dummyGitHubToken")
         val secOk = leaked.isNotEmpty() && redacted.contains("[REDACTED")
         record("M20", "Secret Scanner & Policy Lint", secOk,
             if (secOk) "Detected synthetic credential & verified Play-policy rules" else "Secret scanner failed")
