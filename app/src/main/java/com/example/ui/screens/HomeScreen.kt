@@ -140,7 +140,8 @@ fun HomeScreen(
                 StatusPill(
                     label = stringResource(R.string.guest_mode_badge),
                     color = tokens.primaryAccent,
-                    pulse = !reducedMotion
+                    pulse = !reducedMotion,
+                    modifier = Modifier.testTag("home_guest_mode_pill")
                 )
             }
         }

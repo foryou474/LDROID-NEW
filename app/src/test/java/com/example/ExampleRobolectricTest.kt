@@ -21,7 +21,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [34])
 class ExampleRobolectricTest {
 
     @get:Rule
@@ -68,7 +68,7 @@ class ExampleRobolectricTest {
         composeTestRule.waitForIdle()
         // Home screen top header & hero
         composeTestRule.onNodeWithText("LDROID IDE").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Offline Guest Mode").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_guest_mode_pill").assertIsDisplayed()
         composeTestRule.onNodeWithText("Android Studio in Your Pocket").assertIsDisplayed()
         composeTestRule.onNodeWithTag("active_workspace_card").assertIsDisplayed()
         composeTestRule.onNodeWithText("PulseApp").assertIsDisplayed()
@@ -84,8 +84,8 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithText("Guest Developer").assertIsDisplayed()
         composeTestRule.onNodeWithTag("drawer_section_settings").assertIsDisplayed()
         composeTestRule.onNodeWithTag("drawer_section_dev_lab").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("drawer_section_workspace_lab").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("drawer_section_library").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("drawer_section_workspace_lab").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("drawer_section_library").performScrollTo().assertIsDisplayed()
     }
 
     @Test
