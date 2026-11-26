@@ -21,14 +21,14 @@ object VisualBuilderCodegen {
     )
 
     val starterVisualNodes = listOf(
-        VisualNode("n1", VisualComponentType.TEXT, "M.A.X. Studio Canvas", "headlineMedium", 12, useAccent = false, colorTag = "Cyan"),
-        VisualNode("n2", VisualComponentType.CARD, "System Telemetry", "Modular AI eXecutor active", 14, useAccent = false, colorTag = "Default"),
-        VisualNode("n3", VisualComponentType.COUNTER, "Active Counter", "Tap + or - to update state", 12, useAccent = true, colorTag = "Cyan"),
-        VisualNode("n4", VisualComponentType.BUTTON, "Deploy Build", "", 12, useAccent = true, colorTag = "Emerald")
+        VisualNode("n1", VisualComponentType.TEXT, "LDROID IDE Canvas", "headlineMedium", 12, useAccent = false, colorTag = "Copper"),
+        VisualNode("n2", VisualComponentType.CARD, "PulseApp Workspace", "API 36 Compose M3 Interactive UI", 14, useAccent = false, colorTag = "Default"),
+        VisualNode("n3", VisualComponentType.COUNTER, "Active Counter", "Tap + or - to update state", 12, useAccent = true, colorTag = "Copper"),
+        VisualNode("n4", VisualComponentType.BUTTON, "Build APK", "", 12, useAccent = true, colorTag = "Emerald")
     )
 
     fun generateComposeKotlin(packageName: String, screenName: String, nodes: List<VisualNode>): String {
-        val cleanPkg = packageName.ifBlank { "com.maxstudio.app" }
+        val cleanPkg = packageName.ifBlank { "com.ldroid.pulseapp" }
         val cleanFn = screenName.replace(Regex("""[^A-Za-z0-9_]"""), "").ifBlank { "VisualGeneratedScreen" }
         val hasCounter = nodes.any { it.type == VisualComponentType.COUNTER }
         val hasField = nodes.any { it.type == VisualComponentType.TEXT_FIELD }
@@ -176,6 +176,7 @@ object VisualBuilderCodegen {
     }
 
     private fun colorExpressionForTag(tag: String): String? = when (tag) {
+        "Copper" -> "Color(0xFF8C583A)"
         "Cyan" -> "Color(0xFF00E5FF)"
         "Purple" -> "Color(0xFF9E7CFF)"
         "Emerald" -> "Color(0xFF35D49A)"

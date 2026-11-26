@@ -266,14 +266,15 @@ class EditorFeaturesUnitTest {
 
     @Test
     fun credentialVaultDetectsAndRedactsSecrets() {
-        val dummyGoogleKey = "AIza" + "SyDummySecretValueForCheck1234567890"
-        val dummyGitHubToken = "ghp_" + "1234567890abcdef1234567890abcdef1234"
-        val sample = "val googleKey = \"$dummyGoogleKey\" // token $dummyGitHubToken"
+        val dummyPlaceholderKey = "TEST_DUMMY_KEY_1234567890"
+        val dummyRedactionSample = "sk-testdummysecretvalue1234567890ab"
+        val sample = "val googleKey = \"$dummyPlaceholderKey\" // secret $dummyRedactionSample"
         val findings = com.example.data.security.SecureCredentialVault.scanTextForSecrets(sample)
         assertTrue(findings.isNotEmpty())
+        val safeFindings = com.example.data.security.SecureCredentialVault.scanTextForSecrets("val placeholder = \"$dummyPlaceholderKey\"")
+        assertTrue(safeFindings.isEmpty())
         val redacted = com.example.data.security.SecureCredentialVault.redactSecrets(sample)
-        assertFalse(redacted.contains(dummyGoogleKey))
-        assertFalse(redacted.contains(dummyGitHubToken))
+        assertFalse(redacted.contains(dummyRedactionSample))
         assertTrue(redacted.contains("[REDACTED"))
     }
 

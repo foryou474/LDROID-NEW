@@ -286,7 +286,7 @@ fun EditorLivePreviewPane(
                                     fontSize = 13.sp
                                 )
                                 Text(
-                                    text = "M.A.X. Studio renders previews for .kt, .java, .xml, .dart, .tsx/.js, .html/.css, and .gradle/.json files. '${activeTab.relativePath}' is not a previewable source file.",
+                                    text = "LDROID IDE renders previews for .kt, .java, .xml, .dart, .tsx/.js, .html/.css, and .gradle/.json files. '${activeTab.relativePath}' is not a previewable source file.",
                                     color = tokens.textMuted,
                                     fontSize = 12.sp
                                 )

@@ -49,7 +49,7 @@ class WorkspaceFileManager(
     private val dao: LdroidDao
 ) {
     private val workspacesRoot: File
-        get() = File(context.filesDir, "ldroid_workspaces").apply { mkdirs() }
+        get() = File(context.filesDir, "LDROID_Projects").apply { mkdirs() }
 
     private val baselinesRoot: File
         get() = File(context.filesDir, "ldroid_baselines").apply { mkdirs() }
@@ -61,26 +61,12 @@ class WorkspaceFileManager(
         const val MAX_ZIP_UNCOMPRESSED_BYTES = 64L * 1024L * 1024L // 64 MB Zip Bomb guard
     }
 
-    suspend fun removeDefaultMainActivityIfExists() = withContext(Dispatchers.IO) {
-        runCatching {
-            workspacesRoot.listFiles()?.filter { it.isDirectory }?.forEach { projDir ->
-                projDir.walkTopDown().filter { it.isFile && it.name == "MainActivity.kt" }.forEach { file ->
-                    val content = runCatching { file.readText() }.getOrDefault("")
-                    if (content.contains("fun MaxStarterScreen()") && content.contains("M.A.X. Studio")) {
-                        file.delete()
-                    }
-                }
-            }
-        }
-    }
-
     suspend fun ensureStarterWorkspaceIfEmpty(): ProjectEntity? = withContext(Dispatchers.IO) {
-        removeDefaultMainActivityIfExists()
         val existing = workspacesRoot.listFiles()?.filter { it.isDirectory }.orEmpty()
         if (existing.isEmpty()) {
             createProjectFromTemplate(
-                name = "MaxStarterApp",
-                packageName = "com.maxstudio.starter",
+                name = "PulseApp",
+                packageName = "com.ldroid.pulseapp",
                 template = ProjectTemplate.COMPOSE_M3_APP
             )
         } else {
@@ -96,7 +82,9 @@ class WorkspaceFileManager(
         val cleanName = sanitizeName(name).ifBlank { "NewProject" }
         val cleanPkg = packageName.trim().ifBlank { "com.ldroid.app.${cleanName.lowercase()}" }
         val id = UUID.randomUUID().toString().take(8)
-        val projectDir = File(workspacesRoot, "${cleanName}_$id").apply { mkdirs() }
+        val preferredDir = File(workspacesRoot, cleanName)
+        val projectDir = if (!preferredDir.exists()) preferredDir.apply { mkdirs() }
+        else File(workspacesRoot, "${cleanName}_$id").apply { mkdirs() }
         val now = System.currentTimeMillis()
 
         when (template) {
@@ -108,7 +96,15 @@ class WorkspaceFileManager(
             ProjectTemplate.WEB_PREVIEW_SANDBOX -> writeWebSandboxTemplate(projectDir, cleanName)
         }
 
-        val defaultFile: String? = null
+        val pkgPath = cleanPkg.replace('.', '/')
+        val defaultFile = when (template) {
+            ProjectTemplate.COMPOSE_M3_APP,
+            ProjectTemplate.MULTI_MODULE_KOTLIN -> "app/src/main/java/$pkgPath/MainActivity.kt"
+            ProjectTemplate.JAVA_XML_APP -> "app/src/main/java/$pkgPath/MainActivity.java"
+            ProjectTemplate.FLUTTER_DART -> "lib/main.dart"
+            ProjectTemplate.REACT_NATIVE_TSX -> "App.tsx"
+            ProjectTemplate.WEB_PREVIEW_SANDBOX -> "index.html"
+        }
 
         val entity = ProjectEntity(
             id = id,
@@ -118,7 +114,7 @@ class WorkspaceFileManager(
             rootPath = projectDir.absolutePath,
             createdAtMs = now,
             updatedAtMs = now,
-            lastOpenedFile = null
+            lastOpenedFile = defaultFile
         )
         dao.upsertProject(entity)
         saveBaselineSnapshot(entity)
@@ -425,13 +421,28 @@ class WorkspaceFileManager(
     suspend fun importFilesFromUris(
         project: ProjectEntity,
         uris: List<Uri>
+    ): Result<List<String>> = attachSupportFiles(project, uris)
+
+    suspend fun attachSupportFiles(
+        project: ProjectEntity,
+        uris: List<Uri>
     ): Result<List<String>> = withContext(Dispatchers.IO) {
         runCatching {
             val imported = mutableListOf<String>()
+            val pkgPath = project.packageName.replace('.', '/')
             for (uri in uris) {
-                val fileName = resolveDisplayName(uri) ?: "imported_${System.currentTimeMillis()}"
+                val fileName = resolveDisplayName(uri) ?: "support_${System.currentTimeMillis()}"
                 val cleanName = sanitizeFileName(fileName)
-                val rel = "imported/$cleanName"
+                val ext = cleanName.substringAfterLast('.', "").lowercase()
+                val targetFolder = when (ext) {
+                    "jar", "aar" -> "app/libs"
+                    "ttf", "otf" -> "app/src/main/res/font"
+                    "png", "jpg", "jpeg", "webp", "svg" -> "app/src/main/res/drawable"
+                    "xml" -> "app/src/main/res/layout"
+                    "kt", "java" -> "app/src/main/java/$pkgPath"
+                    else -> "imported"
+                }
+                val rel = "$targetFolder/$cleanName"
                 val dst = resolveSafe(project, rel)
                 dst.parentFile?.mkdirs()
                 context.contentResolver.openInputStream(uri)?.use { input ->
@@ -440,10 +451,49 @@ class WorkspaceFileManager(
                     }
                 } ?: error("Unable to read selected URI: $uri")
                 imported.add(rel)
-                logOp(project.id, "IMPORT_FILE", rel, "${dst.length()} bytes via SAF")
+                logOp(project.id, "ATTACH_FILE", rel, "${dst.length()} bytes via SAF")
             }
             dao.touchProject(project.id, System.currentTimeMillis(), imported.firstOrNull())
             imported
+        }
+    }
+
+    suspend fun injectGradleDependency(
+        project: ProjectEntity,
+        coordinate: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val targetRel = listOf("app/build.gradle.kts", "build.gradle.kts", "app/build.gradle", "build.gradle")
+                .firstOrNull { resolveSafe(project, it).exists() }
+                ?: "app/build.gradle.kts"
+            val gradleFile = resolveSafe(project, targetRel)
+            gradleFile.parentFile?.mkdirs()
+            val current = if (gradleFile.exists()) gradleFile.readText(Charsets.UTF_8) else "dependencies {\n}\n"
+            val artifactId = coordinate.substringBeforeLast(':')
+            if (current.contains(artifactId)) {
+                return@runCatching "$artifactId is already declared in $targetRel"
+            }
+            val depLine = "    implementation(\"$coordinate\")"
+            val updated = if (current.contains("dependencies")) {
+                val depIdx = current.indexOf("dependencies")
+                val closeBrace = current.indexOf('}', startIndex = depIdx)
+                if (closeBrace >= 0) {
+                    buildString {
+                        append(current.substring(0, closeBrace))
+                        if (!current.substring(0, closeBrace).endsWith("\n")) append('\n')
+                        append(depLine).append('\n')
+                        append(current.substring(closeBrace))
+                    }
+                } else {
+                    "$current\ndependencies {\n$depLine\n}\n"
+                }
+            } else {
+                "$current\ndependencies {\n$depLine\n}\n"
+            }
+            gradleFile.writeText(updated, Charsets.UTF_8)
+            dao.touchProject(project.id, System.currentTimeMillis(), targetRel)
+            logOp(project.id, "GRADLE_INJECT", targetRel, "Added $coordinate")
+            "Added $coordinate to $targetRel"
         }
     }
 
@@ -888,11 +938,103 @@ class WorkspaceFileManager(
             </manifest>
         """.trimIndent())
 
+        writeRel(root, "app/src/main/java/$pkgPath/MainActivity.kt", """
+            package $pkg
+
+            import android.os.Bundle
+            import androidx.activity.ComponentActivity
+            import androidx.activity.compose.setContent
+            import androidx.compose.foundation.layout.*
+            import androidx.compose.material3.*
+            import androidx.compose.runtime.*
+            import androidx.compose.ui.Modifier
+            import androidx.compose.ui.unit.dp
+
+            class MainActivity : ComponentActivity() {
+                override fun onCreate(savedInstanceState: Bundle?) {
+                    super.onCreate(savedInstanceState)
+                    setContent {
+                        MaterialTheme {
+                            Surface(modifier = Modifier.fillMaxSize()) {
+                                PulseHomeScreen()
+                            }
+                        }
+                    }
+                }
+            }
+
+            @Composable
+            fun PulseHomeScreen() {
+                var count by remember { mutableIntStateOf(0) }
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("$appName • Compose M3", style = MaterialTheme.typography.headlineSmall)
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("Isolated Workspace Active")
+                            Text("Count: ${'$'}count", style = MaterialTheme.typography.titleMedium)
+                        }
+                    }
+                    Button(onClick = { count++ }) { Text("Increment Counter") }
+                }
+            }
+        """.trimIndent())
+
+        writeRel(root, "app/src/main/java/$pkgPath/NewScreen.kt", """
+            package $pkg
+
+            import androidx.compose.foundation.layout.*
+            import androidx.compose.material3.*
+            import androidx.compose.runtime.Composable
+            import androidx.compose.ui.Modifier
+            import androidx.compose.ui.unit.dp
+
+            @Composable
+            fun NewScreen() {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("$appName Secondary Screen", style = MaterialTheme.typography.titleLarge)
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Text("Ready for Max Studio editing", modifier = Modifier.padding(16.dp))
+                    }
+                }
+            }
+        """.trimIndent())
+
+        writeRel(root, "app/src/main/java/$pkgPath/VisualGeneratedScreen.kt",
+            com.example.data.visual.VisualBuilderCodegen.generateComposeKotlin(
+                packageName = pkg,
+                screenName = "VisualGeneratedScreen",
+                nodes = com.example.data.visual.VisualBuilderCodegen.starterVisualNodes
+            )
+        )
+
         writeRel(root, "app/src/main/res/values/strings.xml", """
             <resources>
                 <string name="app_name">$appName</string>
             </resources>
         """.trimIndent())
+
+        writeRel(root, "app/src/main/res/layout/activity_main.xml", """
+            <?xml version="1.0" encoding="utf-8"?>
+            <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:padding="20dp">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="$appName" />
+            </LinearLayout>
+        """.trimIndent())
+
+        File(root, "build").mkdirs()
+        writeRel(root, "build/.keep", "# Offline APK & DEX staging output directory for $appName")
 
         writeRel(root, "app/src/test/java/$pkgPath/MainUnitTest.kt", """
             package $pkg
@@ -1109,7 +1251,7 @@ class WorkspaceFileManager(
         val snakeName = appName.lowercase().replace(Regex("""[^a-z0-9_]"""), "_").ifBlank { "max_flutter_app" }
         writeRel(root, "pubspec.yaml", """
             name: $snakeName
-            description: "$appName built with M.A.X. Studio"
+            description: "$appName built with LDROID IDE"
             version: 1.0.0+1
 
             environment:
@@ -1125,11 +1267,11 @@ class WorkspaceFileManager(
             import 'package:flutter/material.dart';
 
             void main() {
-              runApp(const MaxFlutterApp());
+              runApp(const LdroidFlutterApp());
             }
 
-            class MaxFlutterApp extends StatelessWidget {
-              const MaxFlutterApp({super.key});
+            class LdroidFlutterApp extends StatelessWidget {
+              const LdroidFlutterApp({super.key});
 
               @override
               Widget build(BuildContext context) {
@@ -1190,7 +1332,7 @@ class WorkspaceFileManager(
         writeRel(root, "README.md", """
             # $appName
 
-            Flutter (Dart) starter workspace created in M.A.X. Studio.
+            Flutter (Dart) starter workspace created in LDROID IDE.
         """.trimIndent())
     }
 
@@ -1279,7 +1421,7 @@ class WorkspaceFileManager(
             <body>
               <main class="card">
                 <h1>$appName</h1>
-                <p>Interactive HTML5, CSS3 &amp; JavaScript workspace in M.A.X. Studio.</p>
+                <p>Interactive HTML5, CSS3 &amp; JavaScript workspace in LDROID IDE.</p>
                 <p class="counter">Clicks: <strong id="countVal">0</strong></p>
                 <button id="pingBtn">Increment Counter</button>
               </main>

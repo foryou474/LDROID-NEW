@@ -438,13 +438,20 @@ fun CodeEditorSurface(
                             textFieldValue = next
                             onTextChange(next.text)
                         }
-                        AccessoryKeyChip("TAB") { applySnippet(" ".repeat(settings.tabWidth), settings.tabWidth) }
-                        AccessoryKeyChip("{ }") { applySnippet("{\n    \n}", 6) }
-                        AccessoryKeyChip("( )") { applySnippet("()", 1) }
-                        AccessoryKeyChip("[ ]") { applySnippet("[]", 1) }
+                        AccessoryKeyChip("Tab") { applySnippet(" ".repeat(settings.tabWidth), settings.tabWidth) }
+                        AccessoryKeyChip("{") { applySnippet("{", 1) }
+                        AccessoryKeyChip("}") { applySnippet("}", 1) }
+                        AccessoryKeyChip("(") { applySnippet("(", 1) }
+                        AccessoryKeyChip(")") { applySnippet(")", 1) }
+                        AccessoryKeyChip("[") { applySnippet("[", 1) }
+                        AccessoryKeyChip("]") { applySnippet("]", 1) }
+                        AccessoryKeyChip(";") { applySnippet(";", 1) }
+                        AccessoryKeyChip("=") { applySnippet(" = ", 3) }
+                        AccessoryKeyChip("<") { applySnippet("<", 1) }
+                        AccessoryKeyChip(">") { applySnippet(">", 1) }
                         AccessoryKeyChip("\" \"") { applySnippet("\"\"", 1) }
                         AccessoryKeyChip("->") { applySnippet(" -> ", 4) }
-                        AccessoryKeyChip("// Comment") {
+                        AccessoryKeyChip("//") {
                             foldedStartLines = emptySet()
                             val next = CodeEditorHelpers.toggleLineComment(textFieldValue, ext)
                             textFieldValue = next

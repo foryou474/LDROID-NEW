@@ -64,7 +64,7 @@ object RoadmapRegistry {
         MilestoneAuditItem("M34", "Build & Supply Chain Verification", "READY", "Pending verification"),
         MilestoneAuditItem("M42", "Multi-Module Architecture Scanner", "READY", "Pending verification"),
         MilestoneAuditItem("M47", "WCAG 2.2 AA Contrast Audit", "READY", "Pending verification"),
-        MilestoneAuditItem("M50", "M.A.X. Studio Release Verification Gate", "READY", "Pending verification")
+        MilestoneAuditItem("M50", "LDROID IDE Release Verification Gate", "READY", "Pending verification")
     )
 
     suspend fun runLiveVerification(
@@ -87,7 +87,7 @@ object RoadmapRegistry {
         // M01 / M05 / M13: Storage & atomic file round-trip
         val ioRoundTripOk = runCatching {
             val probe = File(context.cacheDir, ".max_verify_probe.tmp")
-            val payload = "M.A.X. Studio storage probe ${System.currentTimeMillis()}"
+            val payload = "LDROID IDE storage probe ${System.currentTimeMillis()}"
             probe.writeText(payload, Charsets.UTF_8)
             val readBack = probe.readText(Charsets.UTF_8)
             probe.delete()
@@ -103,9 +103,12 @@ object RoadmapRegistry {
             "$themeCount/10 themes loaded • $contrastViolations contrast violations")
 
         // M03: Navigation Destinations
-        val navOk = PrimaryDestination.entries.size == 5 && PrimaryDestination.AI_STUDIO.label == "M.A.X. AI"
+        val navOk = PrimaryDestination.entries.size == 3 &&
+            PrimaryDestination.HOME.label == "Home" &&
+            PrimaryDestination.MAX_STUDIO.label == "Max Studio" &&
+            PrimaryDestination.GOOGLE.label == "Google"
         record("M03", "Navigation & Adaptive Destinations", navOk,
-            "${PrimaryDestination.entries.size} primary destinations active (Home, Projects, Editor, M.A.X. AI, Settings)")
+            "${PrimaryDestination.entries.size} primary destinations active (Home, Max Studio, Google)")
 
         // M04: Project Manager & Templates
         val templatesOk = activeProjectRoot != null && File(activeProjectRoot).exists()
@@ -209,11 +212,12 @@ object RoadmapRegistry {
             "XML parser & resource scanner passed live validation")
 
         // M20 / M32: Secret Scanner & Vault Redaction
-        val dummyGoogleKey = "AIza" + "SyDummySecretValueForCheck1234567890"
-        val dummyGitHubToken = "ghp_" + "1234567890abcdef1234567890abcdef1234"
-        val leaked = SecureCredentialVault.scanTextForSecrets("val key = \"$dummyGoogleKey\"")
-        val redacted = SecureCredentialVault.redactSecrets("token=$dummyGitHubToken")
-        val secOk = leaked.isNotEmpty() && redacted.contains("[REDACTED")
+        val dummyPlaceholderKey = "TEST_DUMMY_KEY_1234567890"
+        val dummyRedactionSample = "sk-testdummysecretvalue1234567890ab"
+        val leaked = SecureCredentialVault.scanTextForSecrets("val key = \"$dummyRedactionSample\"")
+        val safeScan = SecureCredentialVault.scanTextForSecrets("val placeholder = \"$dummyPlaceholderKey\"")
+        val redacted = SecureCredentialVault.redactSecrets("token=$dummyRedactionSample")
+        val secOk = leaked.isNotEmpty() && safeScan.isEmpty() && redacted.contains("[REDACTED")
         record("M20", "Secret Scanner & Policy Lint", secOk,
             if (secOk) "Detected synthetic credential & verified Play-policy rules" else "Secret scanner failed")
 
@@ -256,7 +260,7 @@ object RoadmapRegistry {
             "Current theme contrast: ${String.format("%.2f", LdroidThemes.contrastRatio(LdroidThemes.byId(settings.themeId).textPrimary, LdroidThemes.byId(settings.themeId).background))}:1")
 
         val allSoFarPassed = results.all { it.status == "VERIFIED" }
-        record("M50", "M.A.X. Studio Release Verification Gate", allSoFarPassed,
+        record("M50", "LDROID IDE Release Verification Gate", allSoFarPassed,
             if (allSoFarPassed) "All automated checks passed across M01–M47" else "${results.count { it.status == "FAILED" }} check(s) require attention")
 
         val elapsed = (System.currentTimeMillis() - startMs).coerceAtLeast(1L)

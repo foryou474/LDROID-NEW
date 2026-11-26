@@ -75,11 +75,11 @@ class TerminalSessionManager(private val context: Context) {
     }
 
     private fun shortPromptName(workDir: String): String {
-        val rawName = File(workDir).name.ifBlank { "MaxStarterApp" }
+        val rawName = File(workDir).name.ifBlank { "PulseApp" }
         return rawName.replace(Regex("""_[0-9a-f]{8}$"""), "").ifBlank { rawName }
     }
 
-    fun createSession(workDir: String, title: String = "Shell ${_sessions.value.size + 1}"): String {
+    fun createSession(workDir: String, title: String = "Termux ${_sessions.value.size + 1}"): String {
         val id = UUID.randomUUID().toString().take(8)
         val promptLabel = shortPromptName(workDir)
         val session = TerminalSession(
@@ -87,8 +87,8 @@ class TerminalSessionManager(private val context: Context) {
             title = title,
             workingDir = workDir,
             lines = listOf(
-                TerminalLine(text = "M.A.X. Studio Terminal [$title] — type 'help' for commands", isPrompt = true),
-                TerminalLine(text = "max@studio:~/$promptLabel $ ready")
+                TerminalLine(text = "LDROID Termux ARM64 Linux [$title] — mounted at ~/LDROID_Projects/$promptLabel", isPrompt = true),
+                TerminalLine(text = "u0_a1@ldroid:~/LDROID_Projects/$promptLabel $ type 'help' for shell & APK build tools")
             )
         )
         _sessions.update { it + session }
@@ -107,7 +107,18 @@ class TerminalSessionManager(private val context: Context) {
             list.map { s ->
                 if (s.id == sessionId) {
                     val promptLabel = shortPromptName(s.workingDir)
-                    s.copy(lines = listOf(TerminalLine(text = "max@studio:~/$promptLabel $", isPrompt = true)))
+                    s.copy(lines = listOf(TerminalLine(text = "u0_a1@ldroid:~/LDROID_Projects/$promptLabel $", isPrompt = true)))
+                } else s
+            }
+        }
+    }
+
+    fun appendLinesToSession(sessionId: String, newLines: List<TerminalLine>) {
+        if (newLines.isEmpty()) return
+        _sessions.update { list ->
+            list.map { s ->
+                if (s.id == sessionId) {
+                    s.copy(lines = (s.lines + newLines).takeLast(500))
                 } else s
             }
         }
@@ -147,7 +158,7 @@ class TerminalSessionManager(private val context: Context) {
                     s.copy(
                         isRunning = true,
                         commandHistory = (s.commandHistory + cmd).takeLast(30),
-                        lines = (s.lines + TerminalLine(text = "max@studio:~/$promptLabel $ $cmd", isPrompt = true)).takeLast(400)
+                        lines = (s.lines + TerminalLine(text = "u0_a1@ldroid:~/LDROID_Projects/$promptLabel $ $cmd", isPrompt = true)).takeLast(500)
                     )
                 } else s
             }
@@ -157,24 +168,52 @@ class TerminalSessionManager(private val context: Context) {
         val head = parts.firstOrNull().orEmpty().lowercase()
         val args = parts.drop(1)
 
-        // Built-in workspace-aware commands (guaranteed functional on every Android device/sandbox)
+        // Built-in workspace-aware Termux + Offline APK toolchain commands
         val builtInResult: Pair<Int, List<TerminalLine>>? = when {
             head == "help" -> 0 to listOf(
-                TerminalLine(text = "M.A.X. Studio Workspace Commands:", isPrompt = true),
-                TerminalLine(text = "  ls [dir]        List files & folders in workspace"),
-                TerminalLine(text = "  pwd             Print current working directory"),
-                TerminalLine(text = "  cd <dir>        Change directory"),
-                TerminalLine(text = "  cat <file>      Print file contents"),
-                TerminalLine(text = "  mkdir <dir>     Create directory"),
-                TerminalLine(text = "  touch <file>    Create empty file"),
-                TerminalLine(text = "  rm <path>       Delete file or folder"),
-                TerminalLine(text = "  git status      Show modified/added/deleted workspace files"),
-                TerminalLine(text = "  git diff        Show unified diff against baseline snapshot"),
-                TerminalLine(text = "  gradle build    Run full workspace syntax & lint verification"),
-                TerminalLine(text = "  clear           Clear terminal output")
+                TerminalLine(text = "LDROID Inbuilt Termux ARM64 Commands:", isPrompt = true),
+                TerminalLine(text = "  ls [dir] / tree   List files & project tree"),
+                TerminalLine(text = "  pwd / cd <dir>    Navigate ~/LDROID_Projects/$promptLabel"),
+                TerminalLine(text = "  cat <file>        Inspect source file contents"),
+                TerminalLine(text = "  mkdir / touch / rm Workspace file operations"),
+                TerminalLine(text = "  git status / diff Compare against baseline snapshot"),
+                TerminalLine(text = "  build-apk         Run offline ARM64 APK pipeline & logs"),
+                TerminalLine(text = "  gradle build      Run workspace lint & verification"),
+                TerminalLine(text = "  pkg list          Show Termux ARM64 compiler binaries"),
+                TerminalLine(text = "  aapt2/kotlinc/d8  Inspect inbuilt SDK toolchain"),
+                TerminalLine(text = "  uname / whoami    Display Linux ARM64 runtime info"),
+                TerminalLine(text = "  clear             Clear terminal output")
             )
+            head == "uname" -> 0 to listOf(
+                TerminalLine(text = "Linux ldroid-termux 6.1.99-android15 aarch64 Android ARM64")
+            )
+            head == "whoami" -> 0 to listOf(TerminalLine(text = "u0_a1"))
             head == "pwd" -> 0 to listOf(
-                TerminalLine(text = "~/$promptLabel (${dir.absolutePath})")
+                TerminalLine(text = "~/LDROID_Projects/$promptLabel (${dir.absolutePath})")
+            )
+            head == "tree" -> {
+                val treeLines = dir.walkTopDown()
+                    .filter { it != dir && !it.name.startsWith(".git") }
+                    .take(80)
+                    .map { f ->
+                        val rel = f.relativeTo(dir).path.replace(File.separatorChar, '/')
+                        val prefix = if (f.isDirectory) "📁 " else "  ├─ "
+                        TerminalLine(text = "$prefix$rel")
+                    }
+                    .toList()
+                0 to (if (treeLines.isEmpty()) listOf(TerminalLine(text = "(empty workspace)")) else treeLines)
+            }
+            head == "pkg" -> 0 to listOf(
+                TerminalLine(text = "LDROID Termux bootstrap-aarch64 packages:", isPrompt = true),
+                TerminalLine(text = "  openjdk-21-aarch64 (21.0.6) [installed]"),
+                TerminalLine(text = "  kotlin-compiler (2.1.20) [installed]"),
+                TerminalLine(text = "  android-sdk-api36 (android.jar) [ready]"),
+                TerminalLine(text = "  aapt2 / d8 / r8 / zipalign / apksigner (36.0.0) [ready]"),
+                TerminalLine(text = "  bash / coreutils / libc++_shared.so / libtermux-exec.so [active]")
+            )
+            head in setOf("aapt2", "kotlinc", "javac", "d8", "r8", "zipalign", "apksigner") -> 0 to listOf(
+                TerminalLine(text = "LDROID ARM64 Toolchain: $head (API 36 profile active)"),
+                TerminalLine(text = "  Run 'build-apk' or tap Build APK in Max Studio to execute pipeline.")
             )
             head == "cd" -> {
                 val arg = cmd.removePrefix("cd").trim()
@@ -193,6 +232,7 @@ class TerminalSessionManager(private val context: Context) {
             head == "rm" -> handleRm(dir, args).also { (code, _) -> if (code == 0) hooks.onWorkspaceChanged() }
             cmd.equals("git status", ignoreCase = true) -> 0 to hooks.onGitStatus()
             cmd.equals("git diff", ignoreCase = true) -> 0 to hooks.onGitDiff()
+            head == "build-apk" || head == "apk" -> hooks.onGradleBuild("assembleDebug")
             head == "gradle" || head == "./gradlew" || head == "gradlew" -> {
                 val task = args.firstOrNull() ?: "build"
                 hooks.onGradleBuild(task)

@@ -219,7 +219,7 @@ class ByokAiGateway {
             }
 
             val systemInstruction = """
-                You are M.A.X. Core AI (Modular AI eXecutor), an expert Android Kotlin & Jetpack Compose engineer inside M.A.X. Studio.
+                You are LDROID IDE AI Architect, an expert Android Kotlin & Jetpack Compose engineer inside LDROID IDE.
                 Provide clear, accurate engineering answers.
                 When proposing code edits, output each file inside exact delimiters so the user can review diffs before applying:
                 <<<FILE: relative/path/to/File.kt>>>

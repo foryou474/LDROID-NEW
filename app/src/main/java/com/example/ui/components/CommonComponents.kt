@@ -773,6 +773,7 @@ private fun resolvePreviewStateTokens(raw: String, count: Int, inputText: String
 }
 
 private fun resolvePreviewColor(tag: String, fallback: Color): Color = when (tag) {
+    "Copper" -> Color(0xFF8C583A)
     "Cyan" -> Color(0xFF00E5FF)
     "Purple" -> Color(0xFF9E7CFF)
     "Emerald" -> Color(0xFF35D49A)

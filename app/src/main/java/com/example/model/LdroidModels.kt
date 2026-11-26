@@ -2,11 +2,51 @@ package com.example.model
 
 enum class PrimaryDestination(val label: String, val route: String) {
     HOME("Home", "home"),
-    PROJECTS("Projects", "projects"),
-    EDITOR("Editor", "editor"),
-    AI_STUDIO("M.A.X. AI", "ai_studio"),
-    SETTINGS("Settings", "settings")
+    MAX_STUDIO("Max Studio", "max_studio"),
+    GOOGLE("Google", "google")
 }
+
+enum class MaxStudioMode(val label: String) {
+    CODE_EG("<> Code E/G"),
+    AI_UI_SCREEN("✨ AI UI Screen"),
+    TERMINAL(">_ Terminal")
+}
+
+data class TermuxCoreItem(
+    val id: String,
+    val name: String,
+    val relativePath: String,
+    val category: String,
+    val detail: String,
+    val isReady: Boolean
+)
+
+data class CompilerBinaryItem(
+    val id: String,
+    val name: String,
+    val version: String,
+    val arch: String,
+    val detail: String,
+    val isReady: Boolean
+)
+
+data class GradlePackageItem(
+    val groupArtifact: String,
+    val version: String,
+    val title: String,
+    val category: String,
+    val description: String
+) {
+    val coordinate: String get() = "$groupArtifact:$version"
+}
+
+data class BrowserConsoleEntry(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val level: String,
+    val message: String,
+    val source: String = "WebView",
+    val timestamp: String
+)
 
 enum class DeveloperLabSection(
     val title: String,

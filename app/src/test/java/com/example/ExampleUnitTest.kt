@@ -27,7 +27,7 @@ class ExampleUnitTest {
 
     @Test
     fun staticAnalyzerDetectsSyntaxAndSecrets() {
-        val syntheticKey = "AIza" + "SyD123456789012345678901234567"
+        val syntheticKey = "sk-testdummysecretvalue1234567890ab"
         val badKotlin = """
             package com.test
             fun broken() {
@@ -36,6 +36,7 @@ class ExampleUnitTest {
         val issues = StaticAnalyzer.analyzeFile("Broken.kt", badKotlin)
         assertTrue(issues.any { it.severity == DiagnosticSeverity.ERROR })
         assertTrue(issues.any { it.severity == DiagnosticSeverity.SECRET })
+        assertTrue(SecureCredentialVault.scanTextForSecrets("val p = \"TEST_DUMMY_KEY_1234567890\"").isEmpty())
     }
 
     @Test
@@ -61,7 +62,7 @@ class ExampleUnitTest {
 
     @Test
     fun secretRedactorMasksTokens() {
-        val syntheticToken = "ghp_" + "1234567890abcdefghij1234567890abcd"
+        val syntheticToken = "sk-testdummysecretvalue1234567890ab"
         val raw = "token=$syntheticToken"
         val redacted = SecureCredentialVault.redactSecrets(raw)
         assertFalse(redacted.contains("1234567890"))

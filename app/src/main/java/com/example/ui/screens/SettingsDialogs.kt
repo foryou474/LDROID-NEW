@@ -202,17 +202,17 @@ fun ApiKeyGuideDialog(
             listOf(
                 "1. Sign in to Google AI Studio (aistudio.google.com) in your browser.",
                 "2. Select 'Get API key' -> 'Create API key' in a Google Cloud project.",
-                "3. Copy the generated key and paste it into the API Key field in M.A.X. Studio.",
+                "3. Copy the generated key and paste it into the API Key field in LDROID IDE.",
                 "4. Keep Base URL as https://generativelanguage.googleapis.com."
             ),
-            "AIza...",
+            "Google AI Studio Key",
             provider.defaultBaseUrl
         )
         com.example.model.AiProviderType.OPENAI_COMPATIBLE -> Triple(
             listOf(
                 "1. Open platform.openai.com/api-keys and create a new secret key.",
                 "2. Ensure billing/credits are active on your OpenAI organization.",
-                "3. Paste the key in M.A.X. Studio and keep Base URL as https://api.openai.com."
+                "3. Paste the key in LDROID IDE and keep Base URL as https://api.openai.com."
             ),
             "sk-...",
             provider.defaultBaseUrl
@@ -221,7 +221,7 @@ fun ApiKeyGuideDialog(
             listOf(
                 "1. Open console.anthropic.com -> API Keys -> Create Key.",
                 "2. Copy the key immediately (Anthropic shows it only once).",
-                "3. Paste it in M.A.X. Studio and keep Base URL as https://api.anthropic.com."
+                "3. Paste it in LDROID IDE and keep Base URL as https://api.anthropic.com."
             ),
             "sk-ant-...",
             provider.defaultBaseUrl

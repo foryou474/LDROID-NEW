@@ -14,9 +14,11 @@ import kotlinx.coroutines.flow.map
 private val Context.ldroidDataStore by preferencesDataStore(name = "ldroid_settings")
 
 data class LdroidSettingsState(
-    val themeId: LdroidThemeId = LdroidThemeId.CYBERPUNK_NEON,
+    val themeId: LdroidThemeId = LdroidThemeId.DESERT_LUXE,
     val customThemeJson: String? = null,
     val reducedMotion: Boolean = false,
+    val developerName: String = "Guest Developer",
+    val developerRole: String = "Offline Android Architect",
     val editorFontSizeSp: Int = 14,
     val tabWidth: Int = 2,
     val autoSaveEnabled: Boolean = true,
@@ -36,7 +38,7 @@ data class LdroidSettingsState(
     val bottomPanelOpen: Boolean = false,
     val bottomPanelTabName: String = "TERMINAL",
     val bottomPanelHeightDp: Int = 230,
-    val editorWorkspaceMode: String = "CODE",
+    val editorWorkspaceMode: String = "AI_UI_SCREEN",
     val persistedTabsJson: String = "{}"
 )
 
@@ -46,6 +48,8 @@ class LdroidPreferences(private val context: Context) {
         val THEME_ID = stringPreferencesKey("theme_id")
         val CUSTOM_THEME_JSON = stringPreferencesKey("custom_theme_json")
         val REDUCED_MOTION = booleanPreferencesKey("reduced_motion")
+        val DEVELOPER_NAME = stringPreferencesKey("developer_name")
+        val DEVELOPER_ROLE = stringPreferencesKey("developer_role")
         val EDITOR_FONT_SIZE = intPreferencesKey("editor_font_size")
         val TAB_WIDTH = intPreferencesKey("tab_width")
         val AUTO_SAVE = booleanPreferencesKey("auto_save")
@@ -71,7 +75,7 @@ class LdroidPreferences(private val context: Context) {
     val settingsFlow: Flow<LdroidSettingsState> = context.ldroidDataStore.data.map { prefs ->
         val themeName = prefs[Keys.THEME_ID]
         val themeId = LdroidThemeId.entries.firstOrNull { it.name == themeName }
-            ?: LdroidThemeId.CYBERPUNK_NEON
+            ?: LdroidThemeId.DESERT_LUXE
         val providerName = prefs[Keys.AI_PROVIDER]
         val provider = AiProviderType.entries.firstOrNull { it.name == providerName }
             ?: AiProviderType.GEMINI
@@ -80,6 +84,8 @@ class LdroidPreferences(private val context: Context) {
             themeId = themeId,
             customThemeJson = prefs[Keys.CUSTOM_THEME_JSON],
             reducedMotion = prefs[Keys.REDUCED_MOTION] ?: false,
+            developerName = prefs[Keys.DEVELOPER_NAME]?.takeIf { it.isNotBlank() } ?: "Guest Developer",
+            developerRole = prefs[Keys.DEVELOPER_ROLE]?.takeIf { it.isNotBlank() } ?: "Offline Android Architect",
             editorFontSizeSp = (prefs[Keys.EDITOR_FONT_SIZE] ?: 14).coerceIn(10, 22),
             tabWidth = (prefs[Keys.TAB_WIDTH] ?: 2).coerceIn(2, 8),
             autoSaveEnabled = prefs[Keys.AUTO_SAVE] ?: true,
@@ -98,7 +104,7 @@ class LdroidPreferences(private val context: Context) {
             bottomPanelOpen = prefs[Keys.BOTTOM_PANEL_OPEN] ?: false,
             bottomPanelTabName = prefs[Keys.BOTTOM_PANEL_TAB] ?: "TERMINAL",
             bottomPanelHeightDp = (prefs[Keys.BOTTOM_PANEL_HEIGHT] ?: 230).coerceIn(140, 460),
-            editorWorkspaceMode = prefs[Keys.EDITOR_MODE] ?: "CODE",
+            editorWorkspaceMode = prefs[Keys.EDITOR_MODE] ?: "AI_UI_SCREEN",
             persistedTabsJson = prefs[Keys.PERSISTED_TABS_JSON] ?: "{}"
         )
     }
@@ -113,6 +119,13 @@ class LdroidPreferences(private val context: Context) {
 
     suspend fun setReducedMotion(enabled: Boolean) {
         context.ldroidDataStore.edit { it[Keys.REDUCED_MOTION] = enabled }
+    }
+
+    suspend fun setDeveloperProfile(name: String, role: String) {
+        context.ldroidDataStore.edit { prefs ->
+            prefs[Keys.DEVELOPER_NAME] = name.trim().ifBlank { "Guest Developer" }
+            prefs[Keys.DEVELOPER_ROLE] = role.trim().ifBlank { "Offline Android Architect" }
+        }
     }
 
     suspend fun updateEditorPrefs(
@@ -168,9 +181,11 @@ class LdroidPreferences(private val context: Context) {
 
     suspend fun resetAllToDefaults() {
         context.ldroidDataStore.edit { prefs ->
-            prefs[Keys.THEME_ID] = LdroidThemeId.CYBERPUNK_NEON.name
+            prefs[Keys.THEME_ID] = LdroidThemeId.DESERT_LUXE.name
             prefs.remove(Keys.CUSTOM_THEME_JSON)
             prefs[Keys.REDUCED_MOTION] = false
+            prefs[Keys.DEVELOPER_NAME] = "Guest Developer"
+            prefs[Keys.DEVELOPER_ROLE] = "Offline Android Architect"
             prefs[Keys.EDITOR_FONT_SIZE] = 14
             prefs[Keys.TAB_WIDTH] = 2
             prefs[Keys.AUTO_SAVE] = true
@@ -186,6 +201,7 @@ class LdroidPreferences(private val context: Context) {
             prefs[Keys.CONFIRM_AI_CHANGES] = true
             prefs[Keys.DEFAULT_GIT_BRANCH] = "main"
             prefs[Keys.BOTTOM_PANEL_OPEN] = false
+            prefs[Keys.EDITOR_MODE] = "AI_UI_SCREEN"
         }
     }
 
@@ -269,7 +285,7 @@ class LdroidPreferences(private val context: Context) {
             val obj = org.json.JSONObject(rawJson.trim())
             val themeId = LdroidThemeId.entries.firstOrNull {
                 it.name == obj.optString("themeId")
-            } ?: LdroidThemeId.CYBERPUNK_NEON
+            } ?: LdroidThemeId.DESERT_LUXE
             val provider = AiProviderType.entries.firstOrNull {
                 it.name == obj.optString("aiProvider")
             } ?: AiProviderType.GEMINI

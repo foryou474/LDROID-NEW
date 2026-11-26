@@ -1,6 +1,6 @@
 {
-  "name": "M.A.X. Studio",
-  "description": "M.A.X. Studio (Modular AI eXecutor) — Jarvis-inspired mobile AI IDE with dynamic model fetching, interactive visual builder, live preview, terminal, and static diagnostics",
+  "name": "LDROID IDE",
+  "description": "LDROID IDE — Android Studio in Your Pocket featuring Desert Luxe Material 3 design, Max Studio (Code E/G, AI UI Screen, Termux Shell), Developer Lab, Library & Packages, and In-App Developer Browser",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

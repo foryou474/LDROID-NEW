@@ -228,7 +228,10 @@ fun AiStudioScreen(
                             }
                         }
                         OutlinedButton(
-                            onClick = { viewModel.selectPrimaryTab(PrimaryDestination.SETTINGS) },
+                            onClick = {
+                                viewModel.selectPrimaryTab(PrimaryDestination.HOME)
+                                viewModel.postMessage("Open ☰ Drawer -> 1. Settings -> All Themes & BYOK AI Keys")
+                            },
                             modifier = Modifier.testTag("ai_configure_key_btn"),
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                         ) {

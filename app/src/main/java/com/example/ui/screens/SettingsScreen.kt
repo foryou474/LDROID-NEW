@@ -629,7 +629,7 @@ fun SettingsScreen(
                 OutlinedTextField(
                     value = githubPatInput,
                     onValueChange = { githubPatInput = it },
-                    placeholder = { Text("ghp_...", fontSize = 12.sp) },
+                    placeholder = { Text("Personal Access Token (TEST_DUMMY_KEY)", fontSize = 12.sp) },
                     visualTransformation = if (showGitHubPat) VisualTransformation.None else PasswordVisualTransformation(),
                     trailingIcon = {
                         IconButton(onClick = { showGitHubPat = !showGitHubPat }) {

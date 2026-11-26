@@ -238,7 +238,7 @@ fun EditorBottomToolPanel(
             // Tab Contents
             when (selectedTab) {
                 BottomToolTab.TERMINAL -> TerminalTabContent(
-                    projectName = uiState.activeProject?.name ?: "MaxStarterApp",
+                    projectName = uiState.activeProject?.name ?: "PulseApp",
                     sessions = sessions,
                     activeSessionId = uiState.activeTerminalSessionId,
                     viewModel = viewModel,
@@ -286,7 +286,7 @@ private fun TerminalTabContent(
         projectName.ifBlank {
             activeSession?.workingDir?.let {
                 File(it).name.replace(Regex("_[a-fA-F0-9]{6,}$"), "")
-            }?.ifBlank { "MaxStarterApp" } ?: "MaxStarterApp"
+            }?.ifBlank { "PulseApp" } ?: "PulseApp"
         }
     }
     val quickCommands = remember {
@@ -309,7 +309,7 @@ private fun TerminalTabContent(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "max@studio:~/$cleanFolder $",
+                text = "u0_a1@ldroid:~/LDROID_Projects/$cleanFolder $",
                 color = tokens.primaryAccent,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,

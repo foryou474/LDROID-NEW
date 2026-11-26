@@ -1034,7 +1034,7 @@ fun EditorScreen(
 }
 
 @Composable
-private fun EditorFileTabsBar(
+internal fun EditorFileTabsBar(
     tabs: List<OpenEditorTab>,
     activePath: String?,
     tokens: LdroidTokens,
@@ -1139,7 +1139,7 @@ private fun tabIconForExtension(ext: String, tokens: LdroidTokens) = when (ext.l
 }
 
 @Composable
-private fun FindReplacePanel(
+internal fun FindReplacePanel(
     activeContent: String,
     findQuery: String,
     matchCase: Boolean,
