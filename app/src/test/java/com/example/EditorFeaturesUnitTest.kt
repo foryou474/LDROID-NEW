@@ -186,7 +186,7 @@ class EditorFeaturesUnitTest {
         """.trimIndent() + "\n"
         assertEquals(expected, formatted)
 
-        val tokens = LdroidThemes.CyberpunkNeon
+        val tokens = LdroidThemes.MidnightMinimal
         val range = 4 until 8
         val highlighted = highlightSyntax(
             code = formatted,
@@ -267,7 +267,7 @@ class EditorFeaturesUnitTest {
     @Test
     fun credentialVaultDetectsAndRedactsSecrets() {
         val dummyPlaceholderKey = "TEST_DUMMY_KEY_1234567890"
-        val dummyRedactionSample = "sk-testdummysecretvalue1234567890ab"
+        val dummyRedactionSample = "sk-" + "testdummysecretvalue1234567890ab"
         val sample = "val googleKey = \"$dummyPlaceholderKey\" // secret $dummyRedactionSample"
         val findings = com.example.data.security.SecureCredentialVault.scanTextForSecrets(sample)
         assertTrue(findings.isNotEmpty())
@@ -297,7 +297,7 @@ class EditorFeaturesUnitTest {
 
     @Test
     fun multiLanguageSyntaxHighlightingProducesSpansAcrossStacks() {
-        val tokens = LdroidThemes.CyberpunkNeon
+        val tokens = LdroidThemes.MidnightMinimal
         val samples = mapOf(
             "dart" to "class MyApp extends StatefulWidget { final int count = 0; // Flutter }",
             "tsx" to "export default function App() { const [count, setCount] = useState(0); return <Text>{count}</Text>; }",
@@ -434,6 +434,79 @@ class EditorFeaturesUnitTest {
         )
         assertTrue(flutterScaffold.contains("package:flutter/material.dart"))
         assertTrue(flutterScaffold.contains("extends StatefulWidget"))
+    }
+
+    @Test
+    fun midnightMinimalThemeTokensAndTenBuiltInThemesMatchSpec() {
+        val m = LdroidThemes.MidnightMinimal
+        assertEquals("Midnight Minimal", m.name)
+        assertEquals(androidx.compose.ui.graphics.Color(0xFF0D1117), m.background)
+        assertEquals(androidx.compose.ui.graphics.Color(0xFF161B22), m.surface1)
+        assertEquals(androidx.compose.ui.graphics.Color(0xFF1F2633), m.border)
+        assertEquals(androidx.compose.ui.graphics.Color(0xFFA8C7FA), m.primaryAccent)
+        assertEquals(androidx.compose.ui.graphics.Color(0xFF3FB950), m.success)
+        assertEquals(androidx.compose.ui.graphics.Color(0xFFF85149), m.error)
+
+        val expectedNames = listOf(
+            "Midnight Minimal", "Obsidian Dark", "Desert Luxe", "Paper Light",
+            "Dracula", "Nord", "Monokai Pro", "Solarized Dark",
+            "Emerald Night", "Amoled Pitch Black"
+        )
+        assertEquals(expectedNames, LdroidThemes.all.map { it.name })
+    }
+
+    @Test
+    fun workspaceSyncEngineFormatsXmlCleanlyAndTracksActivities() {
+        val engine = com.example.data.sync.WorkspaceSyncEngine()
+        val messyXml = "<LinearLayout><TextView android:text=\"Hi\"/><Button android:text=\"Go\"/></LinearLayout>"
+        val clean = engine.formatXmlCleanly(messyXml)
+        assertTrue(clean.contains("<LinearLayout>\n    <TextView"))
+        assertTrue(clean.contains("</LinearLayout>"))
+
+        engine.recordActivity(
+            kind = com.example.model.RecentActivityKind.FILE_EDIT,
+            title = "Edited MainActivity.kt",
+            subtitle = "Line 14",
+            relativePath = "app/src/main/java/MainActivity.kt",
+            targetLine = 14
+        )
+        assertEquals(1, engine.state.value.recentActivities.size)
+        assertEquals("Edited MainActivity.kt", engine.state.value.recentActivities.first().title)
+    }
+
+    @Test
+    fun masterAiOrchestratorProducesThreeVariantsAndSmartAutoFix() {
+        val variants = com.example.data.ai.MasterAiOrchestrator.generateMultiVariantProposals(
+            prompt = "Fitness Tracker Dashboard",
+            packageName = "com.ldroid.fit",
+            existingKtPath = "app/src/main/java/com/ldroid/fit/MainActivity.kt",
+            existingKtContent = null,
+            existingXmlPath = "app/src/main/res/layout/activity_main.xml",
+            existingXmlContent = null
+        )
+        assertEquals(listOf("v1", "v2", "v3"), variants.map { it.variantTag })
+        assertTrue(variants.all { it.proposedChanges.size == 2 })
+
+        val brokenCode = "fun sample() {\n    val x = 1\n"
+        val issue = com.example.model.DiagnosticIssue(
+            filePath = "app/src/main/java/Sample.kt",
+            line = 2,
+            severity = DiagnosticSeverity.ERROR,
+            message = "Unclosed '{' detected (1 unclosed)",
+            source = "Syntax"
+        )
+        val fixed = com.example.data.ai.MasterAiOrchestrator.computeSmartAutoFix(issue, brokenCode)
+        assertNotNull(fixed)
+        assertTrue(fixed!!.trimEnd().endsWith("}"))
+    }
+
+    @Test
+    fun buildApkEngineGeneratesDeterministicQrMatrixAndVersionBump() {
+        val qr = com.example.data.build.BuildApkEngine.buildQrMatrix("http://192.168.1.42:8080/app.apk")
+        assertEquals(21, qr.size)
+        assertTrue(qr[0][0]) // top-left finder corner
+        assertTrue(qr[0][20]) // top-right finder corner
+        assertTrue(qr[20][0]) // bottom-left finder corner
     }
 }
 

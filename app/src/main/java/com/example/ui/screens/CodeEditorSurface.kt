@@ -54,6 +54,7 @@ import com.example.ui.components.SyntaxHighlightedTransformation
 import com.example.ui.components.highlightSyntax
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.LocalLdroidTokens
+import com.example.ui.theme.fontFamilyForOption
 
 @Composable
 fun CodeEditorSurface(
@@ -72,6 +73,9 @@ fun CodeEditorSurface(
     modifier: Modifier = Modifier
 ) {
     val tokens = LocalLdroidTokens.current
+    val activeEditorFont = remember(settings.editorFontFamily) {
+        fontFamilyForOption(settings.editorFontFamily)
+    }
     val ext = tab.relativePath.substringAfterLast('.', "")
     val scrollVertical = rememberScrollState()
     val scrollHorizontal = rememberScrollState()
@@ -122,8 +126,9 @@ fun CodeEditorSurface(
     val (cursorLine, cursorCol) = remember(textFieldValue.text, textFieldValue.selection.start) {
         CodeEditorHelpers.computeLineAndColumn(textFieldValue.text, textFieldValue.selection.start)
     }
-    val matchedBrackets = remember(textFieldValue.text, textFieldValue.selection.start) {
-        CodeEditorHelpers.findMatchingBracket(textFieldValue.text, textFieldValue.selection.start)
+    val matchedBrackets = remember(textFieldValue.text, textFieldValue.selection.start, settings.bracketMatchingEnabled) {
+        if (!settings.bracketMatchingEnabled) null
+        else CodeEditorHelpers.findMatchingBracket(textFieldValue.text, textFieldValue.selection.start)
     }
     val foldableBlocks = remember(textFieldValue.text) {
         CodeEditorHelpers.findFoldableBlocks(textFieldValue.text)
@@ -233,7 +238,7 @@ fun CodeEditorSurface(
                                 Text(
                                     text = lineIdx.toString(),
                                     color = if (isCurrent) tokens.primaryAccent else tokens.editorLineNumber,
-                                    fontFamily = JetBrainsMonoFontFamily,
+                                    fontFamily = activeEditorFont,
                                     fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
                                     fontSize = settings.editorFontSizeSp.sp,
                                     lineHeight = lineHeightSp.sp
@@ -364,7 +369,7 @@ fun CodeEditorSurface(
                                 readOnly = tab.isLargeFilePreview,
                                 textStyle = TextStyle(
                                     color = tokens.textPrimary,
-                                    fontFamily = JetBrainsMonoFontFamily,
+                                    fontFamily = activeEditorFont,
                                     fontSize = settings.editorFontSizeSp.sp,
                                     lineHeight = lineHeightSp.sp
                                 ),
@@ -438,24 +443,19 @@ fun CodeEditorSurface(
                             textFieldValue = next
                             onTextChange(next.text)
                         }
-                        AccessoryKeyChip("Tab") { applySnippet(" ".repeat(settings.tabWidth), settings.tabWidth) }
-                        AccessoryKeyChip("{") { applySnippet("{", 1) }
-                        AccessoryKeyChip("}") { applySnippet("}", 1) }
-                        AccessoryKeyChip("(") { applySnippet("(", 1) }
-                        AccessoryKeyChip(")") { applySnippet(")", 1) }
-                        AccessoryKeyChip("[") { applySnippet("[", 1) }
-                        AccessoryKeyChip("]") { applySnippet("]", 1) }
-                        AccessoryKeyChip(";") { applySnippet(";", 1) }
-                        AccessoryKeyChip("=") { applySnippet(" = ", 3) }
-                        AccessoryKeyChip("<") { applySnippet("<", 1) }
-                        AccessoryKeyChip(">") { applySnippet(">", 1) }
-                        AccessoryKeyChip("\" \"") { applySnippet("\"\"", 1) }
-                        AccessoryKeyChip("->") { applySnippet(" -> ", 4) }
-                        AccessoryKeyChip("//") {
-                            foldedStartLines = emptySet()
-                            val next = CodeEditorHelpers.toggleLineComment(textFieldValue, ext)
-                            textFieldValue = next
-                            onTextChange(next.text)
+                        settings.customQuickSymbols.forEach { sym ->
+                            when (sym.uppercase()) {
+                                "TAB" -> AccessoryKeyChip("TAB") { applySnippet(" ".repeat(settings.tabWidth), settings.tabWidth) }
+                                "\"", "\" \"" -> AccessoryKeyChip("\"") { applySnippet("\"\"", 1) }
+                                "=" -> AccessoryKeyChip("=") { applySnippet("=", 1) }
+                                "//" -> AccessoryKeyChip("//") {
+                                    foldedStartLines = emptySet()
+                                    val next = CodeEditorHelpers.toggleLineComment(textFieldValue, ext)
+                                    textFieldValue = next
+                                    onTextChange(next.text)
+                                }
+                                else -> AccessoryKeyChip(sym) { applySnippet(sym, sym.length) }
+                            }
                         }
                         if (foldableBlocks.isNotEmpty()) {
                             Surface(

@@ -696,9 +696,9 @@ fun SettingsScreen(
                 Spacer(Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(
-                        "Cyan" to LdroidThemeId.CYBERPUNK_NEON,
-                        "Purple" to LdroidThemeId.ROYAL_PURPLE,
-                        "Emerald" to LdroidThemeId.EMERALD_MATRIX
+                        "Midnight" to LdroidThemeId.MIDNIGHT_MINIMAL,
+                        "Dracula" to LdroidThemeId.DRACULA,
+                        "Emerald" to LdroidThemeId.EMERALD_NIGHT
                     ).forEach { (label, targetId) ->
                         FilterChip(
                             selected = settings.themeId == targetId && uiState.previewThemeTokens == null,

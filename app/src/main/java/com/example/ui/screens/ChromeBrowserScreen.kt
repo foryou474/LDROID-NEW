@@ -155,15 +155,15 @@ fun ChromeBrowserScreen(
     val context = LocalContext.current
     val tokens = LocalLdroidTokens.current
 
-    // Chrome Tabs State
+    // Chrome Tabs State — opens directly on the Mobile Google Chrome New Tab start page
     val tabs = remember {
         mutableStateListOf(
             ChromeTab(
                 id = "default_tab",
-                title = "Android Developers",
-                url = "https://developer.android.com",
+                title = "New Tab",
+                url = "chrome://newtab",
                 isIncognito = false,
-                favicon = "🤖"
+                favicon = "🌐"
             )
         )
     }
@@ -171,7 +171,9 @@ fun ChromeBrowserScreen(
     val currentTab = tabs.getOrNull(activeTabIndex) ?: tabs.firstOrNull() ?: ChromeTab()
 
     // Browser navigation & Chrome UI State
-    var urlInput by remember(currentTab.id) { mutableStateOf(currentTab.url) }
+    var urlInput by remember(currentTab.id) {
+        mutableStateOf(if (currentTab.url == "chrome://newtab") "" else currentTab.url)
+    }
     var pageProgress by remember { mutableIntStateOf(100) }
     var desktopMode by remember { mutableStateOf(false) }
     var selectedSearchEngine by remember { mutableStateOf(SearchEngine.GOOGLE) }
@@ -210,7 +212,7 @@ fun ChromeBrowserScreen(
 
     fun navigateTo(raw: String) {
         val resolved = resolveInputToUrl(raw)
-        urlInput = resolved
+        urlInput = if (resolved == "chrome://newtab") "" else resolved
         if (activeTabIndex in tabs.indices) {
             val titleCandidate = when {
                 resolved == "chrome://newtab" -> "New Tab"
@@ -245,7 +247,7 @@ fun ChromeBrowserScreen(
         )
         tabs.add(newTab)
         activeTabIndex = tabs.lastIndex
-        urlInput = url
+        urlInput = if (url == "chrome://newtab") "" else url
         if (url != "chrome://newtab") {
             navigateTo(url)
         }
@@ -255,13 +257,14 @@ fun ChromeBrowserScreen(
         if (tabs.size > 1) {
             tabs.removeAt(index)
             activeTabIndex = activeTabIndex.coerceIn(0, tabs.lastIndex)
-            urlInput = tabs[activeTabIndex].url
-            if (tabs[activeTabIndex].url != "chrome://newtab") {
-                webViewRef?.loadUrl(tabs[activeTabIndex].url)
+            val targetUrl = tabs[activeTabIndex].url
+            urlInput = if (targetUrl == "chrome://newtab") "" else targetUrl
+            if (targetUrl != "chrome://newtab") {
+                webViewRef?.loadUrl(targetUrl)
             }
         } else {
             tabs[0] = ChromeTab(title = "New Tab", url = "chrome://newtab")
-            urlInput = "chrome://newtab"
+            urlInput = ""
         }
     }
 
@@ -299,7 +302,6 @@ fun ChromeBrowserScreen(
                 settings.domStorageEnabled = true
                 settings.loadWithOverviewMode = true
                 settings.useWideViewPort = true
-                settings.databaseEnabled = true
 
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
@@ -395,7 +397,7 @@ fun ChromeBrowserScreen(
                             modifier = Modifier
                                 .clickable {
                                     activeTabIndex = idx
-                                    urlInput = tab.url
+                                    urlInput = if (tab.url == "chrome://newtab") "" else tab.url
                                     if (tab.url != "chrome://newtab") {
                                         webViewRef?.loadUrl(tab.url)
                                     }
@@ -487,7 +489,7 @@ fun ChromeBrowserScreen(
                     IconButton(
                         onClick = {
                             if (currentTab.url == "chrome://newtab") {
-                                urlInput = "chrome://newtab"
+                                urlInput = ""
                             } else {
                                 webViewRef?.reload() ?: navigateTo(urlInput)
                             }
@@ -858,7 +860,7 @@ fun ChromeBrowserScreen(
                                     border = BorderStroke(1.dp, tokens.border),
                                     modifier = Modifier
                                         .clickable { navigateTo(bm.url) }
-                                        .testTag("bookmark_${bm.title.lowercase().replace(" ", "_")}")
+                                        .testTag("fallback_bookmark_${bm.title.lowercase().replace(" ", "_")}")
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -916,7 +918,7 @@ fun ChromeBrowserScreen(
                                 .height(110.dp)
                                 .clickable {
                                     activeTabIndex = tabs.indexOf(tab)
-                                    urlInput = tab.url
+                                    urlInput = if (tab.url == "chrome://newtab") "" else tab.url
                                     if (tab.url != "chrome://newtab") {
                                         webViewRef?.loadUrl(tab.url)
                                     }
@@ -974,7 +976,7 @@ fun ChromeBrowserScreen(
                         tabs.clear()
                         tabs.add(ChromeTab(title = "New Tab", url = "chrome://newtab"))
                         activeTabIndex = 0
-                        urlInput = "chrome://newtab"
+                        urlInput = ""
                         showTabSwitcher = false
                     }
                 ) { Text("Close All") }
@@ -1272,38 +1274,47 @@ private fun ChromeNewTabContent(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(20.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(4.dp))
 
-        // Chrome / Google Center Logo
+        // Chrome Center Emblem
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Surface(
                 shape = CircleShape,
-                color = if (isIncognito) Color(0xFF2E2E36) else tokens.primaryAccent.copy(alpha = 0.16f),
-                border = BorderStroke(2.dp, if (isIncognito) Color(0xFFA8C7FA) else tokens.primaryAccent),
+                color = if (isIncognito) Color(0xFF2E2E36) else tokens.primaryAccent.copy(alpha = 0.14f),
+                border = BorderStroke(1.5.dp, if (isIncognito) Color(0xFFA8C7FA) else tokens.primaryAccent.copy(alpha = 0.55f)),
                 modifier = Modifier.size(68.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = if (isIncognito) Icons.Filled.Shield else Icons.Filled.Language,
-                        contentDescription = "Chrome Browser",
-                        tint = if (isIncognito) Color(0xFFA8C7FA) else tokens.primaryAccent,
-                        modifier = Modifier.size(36.dp)
-                    )
+                    if (isIncognito) {
+                        Icon(
+                            imageVector = Icons.Filled.Shield,
+                            contentDescription = "Chrome Incognito",
+                            tint = Color(0xFFA8C7FA),
+                            modifier = Modifier.size(34.dp)
+                        )
+                    } else {
+                        Icon(
+                            painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_chrome_browser),
+                            contentDescription = "Google Chrome Browser",
+                            tint = tokens.primaryAccent,
+                            modifier = Modifier.size(40.dp)
+                        )
+                    }
                 }
             }
             Spacer(Modifier.height(8.dp))
             Text(
-                text = if (isIncognito) "Chrome Incognito" else "Chrome Browser",
+                text = if (isIncognito) "Chrome Incognito" else "Google Chrome",
                 color = if (isIncognito) Color(0xFFE3E3E3) else tokens.textPrimary,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = if (isIncognito) "Pages you view won't be saved in your browsing history." else "Developer Edition • Android Studio in Your Pocket",
+                text = if (isIncognito) "Pages you view won't be saved in your browsing history." else "Mobile Developer Browser • Fast & Isolated",
                 color = if (isIncognito) Color(0xFF9AA0A6) else tokens.textMuted,
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center
@@ -1368,9 +1379,9 @@ private fun ChromeNewTabContent(
             }
         }
 
-        // Speed Dial / Developer Bookmarks Grid
+        // Speed Dial / Developer Shortcuts & Bookmarks Grid
         Text(
-            text = "Developer Bookmarks",
+            text = "Shortcuts & Bookmarks",
             color = if (isIncognito) Color(0xFFE3E3E3) else tokens.textPrimary,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
@@ -1379,16 +1390,12 @@ private fun ChromeNewTabContent(
 
         LazyVerticalGrid(
             columns = GridCells.Fixed(4),
-            modifier = Modifier.fillMaxWidth().height(180.dp),
+            modifier = Modifier.fillMaxWidth().height(180.dp).testTag("chrome_shortcuts_grid"),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             items(DEFAULT_DEV_BOOKMARKS) { bm ->
-                val tag = when (bm.title) {
-                    "GitHub" -> "bookmark_github"
-                    "Android Docs" -> "bookmark_android_docs"
-                    else -> "bookmark_${bm.title.lowercase().replace(" ", "_")}"
-                }
+                val tag = "shortcut_${bm.title.lowercase().replace(" ", "_")}"
                 Surface(
                     color = if (isIncognito) Color(0xFF26262E) else tokens.surface2,
                     shape = RoundedCornerShape(14.dp),
@@ -1438,16 +1445,4 @@ private fun ChromeNewTabContent(
             }
         }
     }
-}
-
-/**
- * Backward compatibility alias for GoogleBrowserScreen.
- */
-@Composable
-fun GoogleBrowserScreen(
-    uiState: LdroidUiState,
-    viewModel: LdroidViewModel,
-    modifier: Modifier = Modifier
-) {
-    ChromeBrowserScreen(uiState = uiState, viewModel = viewModel, modifier = modifier)
 }

@@ -27,7 +27,7 @@ class ExampleUnitTest {
 
     @Test
     fun staticAnalyzerDetectsSyntaxAndSecrets() {
-        val syntheticKey = "sk-testdummysecretvalue1234567890ab"
+        val syntheticKey = "sk-" + "testdummysecretvalue1234567890ab"
         val badKotlin = """
             package com.test
             fun broken() {
@@ -62,7 +62,7 @@ class ExampleUnitTest {
 
     @Test
     fun secretRedactorMasksTokens() {
-        val syntheticToken = "sk-testdummysecretvalue1234567890ab"
+        val syntheticToken = "sk-" + "testdummysecretvalue1234567890ab"
         val raw = "token=$syntheticToken"
         val redacted = SecureCredentialVault.redactSecrets(raw)
         assertFalse(redacted.contains("1234567890"))

@@ -10,7 +10,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.unit.dp
 
-val LocalLdroidTokens = staticCompositionLocalOf { LdroidThemes.DesertLuxe }
+val LocalLdroidTokens = staticCompositionLocalOf { LdroidThemes.MidnightMinimal }
 
 // Consistent component radii: buttons ~12dp, cards ~16dp, dialogs ~24dp
 val LdroidShapes = Shapes(
@@ -23,7 +23,7 @@ val LdroidShapes = Shapes(
 
 @Composable
 fun LdroidTheme(
-    tokens: LdroidTokens = LdroidThemes.DesertLuxe,
+    tokens: LdroidTokens = LdroidThemes.MidnightMinimal,
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (tokens.isDark) {

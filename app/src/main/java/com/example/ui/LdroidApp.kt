@@ -14,15 +14,14 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.Language
-import androidx.compose.material.icons.outlined.Public
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalNavigationDrawer
@@ -154,10 +153,7 @@ fun LdroidApp(viewModel: LdroidViewModel) {
                                     selected = selected,
                                     onClick = { viewModel.selectPrimaryTab(dest) },
                                     icon = {
-                                        Icon(
-                                            imageVector = iconForTab(dest, selected),
-                                            contentDescription = dest.label
-                                        )
+                                        DestinationNavIcon(dest = dest, selected = selected)
                                     },
                                     label = {
                                         Text(
@@ -195,10 +191,7 @@ fun LdroidApp(viewModel: LdroidViewModel) {
                                     selected = selected,
                                     onClick = { viewModel.selectPrimaryTab(dest) },
                                     icon = {
-                                        Icon(
-                                            imageVector = iconForTab(dest, selected),
-                                            contentDescription = dest.label
-                                        )
+                                        DestinationNavIcon(dest = dest, selected = selected)
                                     },
                                     label = { Text(dest.label, fontSize = 11.sp) },
                                     colors = NavigationRailItemDefaults.colors(
@@ -237,15 +230,13 @@ fun LdroidApp(viewModel: LdroidViewModel) {
                                 reducedMotion = settings.reducedMotion,
                                 onOpenDrawer = { coroutineScope.launch { drawerState.open() } },
                                 onNavigateTab = { viewModel.selectPrimaryTab(it) },
-                                onOpenLabSection = { viewModel.openDeveloperLabSection(it) },
-                                onOpenFile = { viewModel.openFileInEditor(it, jumpToEditorTab = true) },
-                                onJumpToFileLine = { rel, line -> viewModel.jumpToFileLine(rel, line) },
+                                onJumpToActivity = { act -> viewModel.jumpToRecentActivity(act) },
                                 onApplyTheme = { viewModel.applyTheme(it) },
                                 onNewProject = { appName, pkg, tpl ->
-                                    viewModel.createProject(appName, pkg, tpl, openMaxStudio = false)
+                                    viewModel.createProject(appName, pkg, tpl, openMaxStudio = true)
                                 },
                                 onSwitchProject = { proj ->
-                                    viewModel.switchProject(proj, openMaxStudio = false)
+                                    viewModel.switchProject(proj, openMaxStudio = true)
                                 },
                                 onImportZipClick = {
                                     importZipLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "*/*"))
@@ -258,6 +249,7 @@ fun LdroidApp(viewModel: LdroidViewModel) {
                                 terminalSessions = terminalSessions,
                                 viewModel = viewModel,
                                 isExpandedWidth = isWide,
+                                onOpenDrawer = { coroutineScope.launch { drawerState.open() } },
                                 onBackToHome = { viewModel.selectPrimaryTab(PrimaryDestination.HOME) },
                                 modifier = Modifier.weight(1f)
                             )
@@ -274,10 +266,23 @@ fun LdroidApp(viewModel: LdroidViewModel) {
     }
 }
 
-private fun iconForTab(dest: PrimaryDestination, selected: Boolean) = when (dest) {
-    PrimaryDestination.HOME -> if (selected) Icons.Filled.Home else Icons.Outlined.Home
-    PrimaryDestination.MAX_STUDIO -> if (selected) Icons.Filled.AutoAwesome else Icons.Outlined.AutoAwesome
-    PrimaryDestination.CHROME -> if (selected) Icons.Filled.Language else Icons.Outlined.Language
+@Composable
+private fun DestinationNavIcon(dest: PrimaryDestination, selected: Boolean) {
+    when (dest) {
+        PrimaryDestination.HOME -> Icon(
+            imageVector = if (selected) Icons.Filled.Home else Icons.Outlined.Home,
+            contentDescription = dest.label
+        )
+        PrimaryDestination.MAX_STUDIO -> Icon(
+            imageVector = if (selected) Icons.Filled.AutoAwesome else Icons.Outlined.AutoAwesome,
+            contentDescription = dest.label
+        )
+        PrimaryDestination.CHROME -> Icon(
+            painter = painterResource(id = R.drawable.ic_chrome_browser),
+            contentDescription = dest.label,
+            modifier = Modifier.size(24.dp)
+        )
+    }
 }
 
 private fun resolveUriName(context: android.content.Context, uri: Uri): String? {

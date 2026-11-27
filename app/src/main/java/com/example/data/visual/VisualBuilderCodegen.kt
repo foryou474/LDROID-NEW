@@ -118,6 +118,11 @@ object VisualBuilderCodegen {
                         appendLine("            Text(\"${escape(node.label)}\")")
                         appendLine("        }")
                     }
+                    VisualComponentType.IMAGE -> {
+                        appendLine("        Surface(modifier = Modifier.fillMaxWidth().height(96.dp).padding(${node.paddingDp}.dp), shape = MaterialTheme.shapes.medium) {")
+                        appendLine("            Box(contentAlignment = Alignment.Center) { Text(\"🖼 ${escape(node.label)}\") }")
+                        appendLine("        }")
+                    }
                 }
             }
             appendLine("    }")
@@ -145,6 +150,9 @@ object VisualBuilderCodegen {
                 )
                 VisualComponentType.SWITCH_CONTROL -> appendLine(
                     """    <Switch android:layout_width="match_parent" android:layout_height="wrap_content" android:text="${escapeXml(node.label)}" />"""
+                )
+                VisualComponentType.IMAGE -> appendLine(
+                    """    <ImageView android:layout_width="match_parent" android:layout_height="96dp" android:contentDescription="${escapeXml(node.label)}" />"""
                 )
                 else -> appendLine(
                     """    <Space android:layout_width="match_parent" android:layout_height="${node.paddingDp}dp" />"""

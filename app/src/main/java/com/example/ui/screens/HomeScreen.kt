@@ -23,12 +23,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.RocketLaunch
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -56,10 +59,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.local.ProjectEntity
-import com.example.model.DeveloperLabSection
 import com.example.model.DiagnosticSeverity
 import com.example.model.PrimaryDestination
 import com.example.model.ProjectTemplate
+import com.example.model.RecentActivityItem
+import com.example.model.RecentActivityKind
 import com.example.ui.components.LdroidSurfaceCard
 import com.example.ui.components.StatusPill
 import com.example.ui.theme.JetBrainsMonoFontFamily
@@ -72,13 +76,11 @@ import com.example.viewmodel.LdroidUiState
 fun HomeScreen(
     uiState: LdroidUiState,
     activeThemeName: String,
-    activeThemeId: LdroidThemeId = LdroidThemeId.DESERT_LUXE,
+    activeThemeId: LdroidThemeId = LdroidThemeId.MIDNIGHT_MINIMAL,
     reducedMotion: Boolean = false,
     onOpenDrawer: () -> Unit,
     onNavigateTab: (PrimaryDestination) -> Unit,
-    onOpenLabSection: (DeveloperLabSection) -> Unit,
-    onOpenFile: (String) -> Unit,
-    onJumpToFileLine: (String, Int) -> Unit = { _, _ -> },
+    onJumpToActivity: (RecentActivityItem) -> Unit,
     onApplyTheme: (LdroidThemeId) -> Unit = {},
     onNewProject: (String, String, ProjectTemplate) -> Unit,
     onSwitchProject: (ProjectEntity) -> Unit,
@@ -97,7 +99,7 @@ fun HomeScreen(
             .fillMaxSize()
             .background(tokens.background)
     ) {
-        // 1. Top Header: Left Hamburger Menu (☰), Title "LDROID IDE", Right "Offline Guest Mode"
+        // 1. Top Header: Left Hamburger Menu (☰), Title "LDROID IDE", Right "● Offline Guest Mode"
         Surface(
             color = tokens.surface1,
             border = BorderStroke(1.dp, tokens.border),
@@ -153,16 +155,13 @@ fun HomeScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 2. Hero Card: "Android Studio in Your Pocket" with "Open Editor" & "Import ZIP"
+            // 2. Hero Card: "Android Studio in Your Pocket" with Open Editor & Import ZIP
             item {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(20.dp),
                     color = tokens.surface1,
-                    border = BorderStroke(
-                        1.dp,
-                        Brush.linearGradient(listOf(tokens.primaryAccent, tokens.secondaryAccent))
-                    )
+                    border = BorderStroke(1.dp, tokens.border)
                 ) {
                     Column(
                         modifier = Modifier
@@ -170,7 +169,7 @@ fun HomeScreen(
                                 Brush.linearGradient(
                                     listOf(
                                         tokens.primaryAccent.copy(alpha = 0.14f),
-                                        tokens.secondaryAccent.copy(alpha = 0.08f),
+                                        tokens.secondaryAccent.copy(alpha = 0.06f),
                                         tokens.surface1
                                     )
                                 )
@@ -244,7 +243,11 @@ fun HomeScreen(
                                     .height(48.dp)
                                     .testTag("home_import_zip_btn"),
                                 shape = RoundedCornerShape(12.dp),
-                                border = BorderStroke(1.dp, tokens.border)
+                                border = BorderStroke(1.dp, tokens.border),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = tokens.surface2,
+                                    contentColor = tokens.textPrimary
+                                )
                             ) {
                                 Icon(
                                     Icons.Filled.FolderOpen,
@@ -258,13 +261,13 @@ fun HomeScreen(
                         }
 
                         FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             listOf(
                                 "Desert Luxe" to LdroidThemeId.DESERT_LUXE,
-                                "Obsidian Dark" to LdroidThemeId.OBSIDIAN_GLASS,
-                                "Paper Light" to LdroidThemeId.ARCTIC_LIGHT
+                                "Obsidian Dark" to LdroidThemeId.OBSIDIAN_DARK,
+                                "Paper Light" to LdroidThemeId.PAPER_LIGHT
                             ).forEach { (label, id) ->
                                 FilterChip(
                                     selected = activeThemeId == id,
@@ -277,7 +280,7 @@ fun HomeScreen(
                 }
             }
 
-            // 3. Active Workspace Card ("PulseApp", "API 36", "0 Errors" badge, Heap memory, Storage)
+            // 3. Active Workspace Card
             item {
                 val active = uiState.activeProject
                 LdroidSurfaceCard(
@@ -328,39 +331,33 @@ fun HomeScreen(
                         )
                         TelemetryMiniChip(
                             title = "Heap",
-                            value = probe?.let { "${it.javaHeapUsedMb}/${it.javaHeapMaxMb} MB" } ?: "...",
+                            value = probe?.let { "${it.javaHeapUsedMb}/${it.javaHeapMaxMb} MB" } ?: "39/256 MB",
                             modifier = Modifier.weight(1f)
                         )
                         TelemetryMiniChip(
                             title = "Storage",
-                            value = probe?.let { "${it.freeStorageMb} MB free" } ?: "...",
+                            value = probe?.let { "${it.freeStorageMb} MB free" } ?: "Free MB",
                             modifier = Modifier.weight(1f)
                         )
                     }
                 }
             }
 
-            // 4. Projects Card (Integrated on Home, NOT a bottom tab)
+            // 4. My Projects Section
             item {
                 LdroidSurfaceCard(modifier = Modifier.testTag("home_projects_card")) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "My Projects (${uiState.projects.size})",
-                                color = tokens.textPrimary,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "Isolated /LDROID_Projects/<AppName> workspaces",
-                                color = tokens.textMuted,
-                                fontSize = 11.sp
-                            )
-                        }
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "My Projects (${uiState.projects.size})",
+                            color = tokens.textPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Isolated /LDROID_Projects/<AppName> workspaces",
+                            color = tokens.textMuted,
+                            fontSize = 11.sp
+                        )
                     }
 
                     Spacer(Modifier.height(10.dp))
@@ -382,7 +379,7 @@ fun HomeScreen(
                         ) {
                             Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("+ New", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("New", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                         OutlinedButton(
                             onClick = onImportZipClick,
@@ -457,7 +454,7 @@ fun HomeScreen(
                                     }
                                     Icon(
                                         Icons.AutoMirrored.Filled.ArrowForward,
-                                        contentDescription = "Switch to ${project.name}",
+                                        contentDescription = "Open ${project.name} in Editor",
                                         tint = tokens.primaryAccent,
                                         modifier = Modifier.size(18.dp)
                                     )
@@ -468,99 +465,134 @@ fun HomeScreen(
                 }
             }
 
-            // Active Diagnostics Quick Jump (if any)
-            if (uiState.diagnostics.isNotEmpty()) {
-                item {
+            // 5. Recent Activities Timeline (replaces static diagnostics & quick files on Home)
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("recent_activities_section"),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.History,
+                            contentDescription = null,
+                            tint = tokens.primaryAccent,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Recent Activities",
+                            color = tokens.textPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+                    }
                     Text(
-                        text = "Workspace Diagnostics (${uiState.diagnostics.size})",
-                        color = tokens.textPrimary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
+                        text = "Tap any row to jump",
+                        color = tokens.textMuted,
+                        fontSize = 11.sp
                     )
                 }
-                items(uiState.diagnostics.take(3)) { issue ->
-                    val sevColor = when (issue.severity) {
-                        DiagnosticSeverity.ERROR, DiagnosticSeverity.SECRET -> tokens.error
-                        DiagnosticSeverity.WARNING -> tokens.warning
-                        DiagnosticSeverity.INFO -> tokens.info
+            }
+
+            val timeline = uiState.syncSnapshot.recentActivities
+            if (timeline.isEmpty()) {
+                item {
+                    LdroidSurfaceCard(onClick = { onNavigateTab(PrimaryDestination.MAX_STUDIO) }) {
+                        Text(
+                            text = "Ready for your first edit, AI build, or APK export",
+                            color = tokens.textPrimary,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp
+                        )
+                        Text(
+                            text = "Open Editor Workspace to start editing code, designing UI visually, or generating apps with AI.",
+                            color = tokens.textMuted,
+                            fontSize = 11.sp
+                        )
                     }
-                    LdroidSurfaceCard(onClick = { onJumpToFileLine(issue.filePath, issue.line) }) {
+                }
+            } else {
+                items(timeline.take(8), key = { it.id }) { act ->
+                    val kindColor = when (act.kind) {
+                        RecentActivityKind.FILE_EDIT -> tokens.primaryAccent
+                        RecentActivityKind.AI_APPLY -> tokens.tertiaryAccent
+                        RecentActivityKind.APK_BUILD -> tokens.success
+                        RecentActivityKind.PROJECT_OPEN -> tokens.secondaryAccent
+                    }
+                    val kindIcon = when (act.kind) {
+                        RecentActivityKind.FILE_EDIT -> Icons.Filled.Edit
+                        RecentActivityKind.AI_APPLY -> Icons.Filled.AutoAwesome
+                        RecentActivityKind.APK_BUILD -> Icons.Filled.Build
+                        RecentActivityKind.PROJECT_OPEN -> Icons.Filled.Code
+                    }
+                    LdroidSurfaceCard(
+                        onClick = { onJumpToActivity(act) },
+                        modifier = Modifier.testTag("activity_row_${act.id}")
+                    ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                Icons.Filled.Warning,
-                                contentDescription = issue.severity.name,
-                                tint = sevColor,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            Surface(
+                                color = kindColor.copy(alpha = 0.14f),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = kindIcon,
+                                        contentDescription = act.kind.badgeLabel,
+                                        tint = kindColor,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
                             Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = act.title,
+                                        color = tokens.textPrimary,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
+                                    )
+                                    Surface(
+                                        color = kindColor.copy(alpha = 0.16f),
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text(
+                                            text = act.kind.badgeLabel,
+                                            color = kindColor,
+                                            fontSize = 10.sp,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
                                 Text(
-                                    text = "${issue.filePath}:${issue.line}",
-                                    color = tokens.primaryAccent,
+                                    text = "${act.timeLabel} • ${act.subtitle}",
+                                    color = tokens.textMuted,
                                     fontSize = 11.sp,
                                     fontFamily = JetBrainsMonoFontFamily,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                Text(
-                                    text = issue.message,
-                                    color = tokens.textPrimary,
-                                    fontSize = 12.sp,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
                             }
                             Icon(
-                                Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = "Open file",
-                                tint = tokens.textMuted,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Quick Workspace Files Jump
-            if (uiState.workspaceFiles.isNotEmpty()) {
-                item {
-                    Text(
-                        text = "Quick Workspace Files",
-                        color = tokens.textPrimary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
-                    )
-                }
-                items(uiState.workspaceFiles.filter { !it.isDirectory }.take(5)) { item ->
-                    LdroidSurfaceCard(onClick = { onOpenFile(item.relativePath) }) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = item.name,
-                                    color = tokens.textPrimary,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 14.sp
-                                )
-                                Text(
-                                    text = item.relativePath,
-                                    color = tokens.textMuted,
-                                    fontSize = 11.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = "Open ${item.name}",
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = "Jump to ${act.targetTab.label}",
                                 tint = tokens.primaryAccent,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }
@@ -667,7 +699,7 @@ private fun HomeNewProjectDialog(
                 ),
                 modifier = Modifier.testTag("confirm_new_project_btn")
             ) {
-                Text("Create & Switch")
+                Text("Create & Open")
             }
         },
         dismissButton = {

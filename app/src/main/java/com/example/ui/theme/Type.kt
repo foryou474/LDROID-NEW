@@ -21,6 +21,13 @@ val JetBrainsMonoFontFamily = FontFamily(
     Font(R.font.jetbrains_mono, FontWeight.Bold)
 )
 
+fun fontFamilyForOption(option: com.example.model.EditorFontFamilyOption): FontFamily = when (option) {
+    com.example.model.EditorFontFamilyOption.JETBRAINS_MONO -> JetBrainsMonoFontFamily
+    com.example.model.EditorFontFamilyOption.FIRA_CODE -> FontFamily.Monospace
+    com.example.model.EditorFontFamilyOption.SOURCE_CODE_PRO -> JetBrainsMonoFontFamily
+    com.example.model.EditorFontFamilyOption.SYSTEM_MONO -> FontFamily.Monospace
+}
+
 // Documented 11sp–32sp typography scale using Inter for UI and JetBrains Mono for code/terminal
 val LdroidTypography = Typography(
     displaySmall = TextStyle(

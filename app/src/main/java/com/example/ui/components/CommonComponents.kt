@@ -742,6 +742,27 @@ fun DeviceFramePreviewCanvas(
                             Switch(checked = switchState, onCheckedChange = { switchState = it })
                         }
                         VisualComponentType.SPACER -> Spacer(modifier = Modifier.height(node.paddingDp.dp))
+                        VisualComponentType.IMAGE -> Surface(
+                            modifier = selectionModifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            color = nodeAccent.copy(alpha = 0.14f),
+                            border = BorderStroke(1.dp, if (isSelected) tokens.primaryAccent else screenBorder)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(72.dp)
+                                    .padding(node.paddingDp.coerceIn(4, 16).dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "🖼 ${resolvedLabel.ifBlank { "Image Asset" }}",
+                                    color = screenAccent,
+                                    fontSize = (12f * fontScale).sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
                         VisualComponentType.COLUMN, VisualComponentType.ROW -> Surface(
                             modifier = selectionModifier.fillMaxWidth(),
                             shape = RoundedCornerShape(10.dp),

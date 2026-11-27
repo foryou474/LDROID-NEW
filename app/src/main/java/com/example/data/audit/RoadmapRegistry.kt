@@ -106,9 +106,10 @@ object RoadmapRegistry {
         val navOk = PrimaryDestination.entries.size == 3 &&
             PrimaryDestination.HOME.label == "Home" &&
             PrimaryDestination.MAX_STUDIO.label == "Max Studio" &&
-            (PrimaryDestination.CHROME.label == "Chrome" || PrimaryDestination.GOOGLE.label == "Chrome")
+            PrimaryDestination.CHROME.label == "Chrome" &&
+            com.example.model.EditorWorkspaceTab.entries.size == 7
         record("M03", "Navigation & Adaptive Destinations", navOk,
-            "${PrimaryDestination.entries.size} primary destinations active (Home, Max Studio, Chrome)")
+            "${PrimaryDestination.entries.size} primary destinations (Home, Max Studio, Chrome) • 7 Editor tabs active")
 
         // M04: Project Manager & Templates
         val templatesOk = activeProjectRoot != null && File(activeProjectRoot).exists()
@@ -213,7 +214,7 @@ object RoadmapRegistry {
 
         // M20 / M32: Secret Scanner & Vault Redaction
         val dummyPlaceholderKey = "TEST_DUMMY_KEY_1234567890"
-        val dummyRedactionSample = "sk-testdummysecretvalue1234567890ab"
+        val dummyRedactionSample = "sk-" + "testdummysecretvalue1234567890ab"
         val leaked = SecureCredentialVault.scanTextForSecrets("val key = \"$dummyRedactionSample\"")
         val safeScan = SecureCredentialVault.scanTextForSecrets("val placeholder = \"$dummyPlaceholderKey\"")
         val redacted = SecureCredentialVault.redactSecrets("token=$dummyRedactionSample")

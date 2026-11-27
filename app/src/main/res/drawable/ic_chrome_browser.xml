@@ -1,0 +1,26 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- Center Chrome Lens -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,8.8 A3.2,3.2 0 1,0 12,15.2 A3.2,3.2 0 1,0 12,8.8 Z" />
+
+    <!-- Top Petal -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M3.58,6.61 A10,10 0 0,1 20.17,6.25 L11.50,6.25 A5.2,5.2 0 0,0 8.02,14.30 Z" />
+
+    <!-- Bottom-Right Petal -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M20.88,7.41 A10,10 0 0,1 12.89,21.96 L17.23,14.45 A5.2,5.2 0 0,0 12.00,7.40 Z" />
+
+    <!-- Bottom-Left Petal -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M11.54,21.99 A10,10 0 0,1 2.93,7.80 L7.27,15.31 A5.2,5.2 0 0,0 15.98,14.30 Z" />
+</vector>

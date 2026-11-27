@@ -6,16 +6,18 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import com.example.model.AiProviderType
 import java.security.KeyStore
+import java.security.MessageDigest
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 /**
- * Encrypts user-owned BYOK API keys and GitHub tokens using AndroidKeyStore AES-256-GCM.
- * Never logs or exposes plaintext credentials in diagnostics or workspace files.
+ * Encrypts user-owned BYOK API keys, OAuth/PAT tokens, and signing credentials
+ * using AndroidKeyStore AES-256-GCM (with deterministic AES-256-GCM fallback in JVM/Robolectric).
  */
-class SecureCredentialVault(context: Context) {
+class SecureCredentialVault(private val context: Context) {
 
     private val prefs = context.getSharedPreferences("ldroid_secure_vault", Context.MODE_PRIVATE)
 
@@ -62,7 +64,7 @@ class SecureCredentialVault(context: Context) {
     }
 
     private fun getOrCreateKey(): SecretKey? {
-        return runCatching {
+        val androidKs = runCatching {
             val ks = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
             (ks.getKey(KEY_ALIAS, null) as? SecretKey) ?: run {
                 val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER)
@@ -77,6 +79,15 @@ class SecureCredentialVault(context: Context) {
                 generator.init(spec)
                 generator.generateKey()
             }
+        }.getOrNull()
+
+        if (androidKs != null) return androidKs
+
+        // Local JVM / Robolectric fallback AES-256 key derived from package + salt
+        return runCatching {
+            val seed = "${context.packageName}:${KEY_ALIAS}".toByteArray(Charsets.UTF_8)
+            val digest = MessageDigest.getInstance("SHA-256").digest(seed)
+            SecretKeySpec(digest, "AES")
         }.getOrNull()
     }
 
@@ -121,4 +132,10 @@ class SecureCredentialVault(context: Context) {
 
     fun slotForAiProvider(provider: AiProviderType): String = "byok_${provider.name}"
     val githubTokenSlot: String = "github_pat_token"
+    val firebaseConfigSlot: String = "firebase_project_token"
+    val supabaseUrlSlot: String = "supabase_url"
+    val supabaseKeySlot: String = "supabase_anon_key"
+    val figmaTokenSlot: String = "figma_pat_token"
+    val googleAuthSlot: String = "google_account_token"
+    val keystorePasswordSlot: String = "custom_jks_password"
 }

@@ -4,8 +4,9 @@
     <string name="nav_home">Home</string>
     <string name="nav_max_studio">Max Studio</string>
     <string name="nav_chrome">Chrome</string>
-    <string name="nav_google">Google</string>
     <string name="guest_mode_badge">Offline Guest Mode</string>
+    <string name="editor_default_title">Your Project</string>
+    <string name="ai_dock_hint">Message AI...</string>
     <string name="error_empty_project_name">Project name cannot be empty.</string>
     <string name="error_invalid_theme_json">Invalid theme JSON format.</string>
 </resources>
